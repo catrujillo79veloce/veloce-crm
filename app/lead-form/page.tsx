@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Bike, CheckCircle, Loader2 } from "lucide-react"
 
@@ -13,6 +13,14 @@ const INTEREST_OPTIONS = [
 ]
 
 export default function LeadFormPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-red-500" /></div>}>
+      <LeadFormContent />
+    </Suspense>
+  )
+}
+
+function LeadFormContent() {
   const searchParams = useSearchParams()
 
   const [formData, setFormData] = useState({
