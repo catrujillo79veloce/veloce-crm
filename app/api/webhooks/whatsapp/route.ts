@@ -29,20 +29,19 @@ export async function GET(request: NextRequest) {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
-  // Return 200 fast to prevent Meta retries (process asynchronously below)
   const rawBody = await request.text()
 
   // Verify signature
   const signature = request.headers.get("x-hub-signature-256") ?? ""
   const appSecret = process.env.WHATSAPP_APP_SECRET ?? ""
 
-  if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
+  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
     console.warn("[WhatsApp Webhook] Invalid signature")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
   // Parse body
-  let body: any
+  let body: Record<string, unknown>
   try {
     body = JSON.parse(rawBody)
   } catch {
@@ -50,27 +49,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Run CRM processing and agent forward in parallel, AWAIT both before returning
-  // Vercel kills the process after response, so we must await here
-  const [crmResult, agentResult] = await Promise.allSettled([
-    processWhatsAppMessages(body),
-    forwardToAgent(rawBody),
-  ])
+  // Process messages in CRM (await to ensure completion before Vercel kills process)
+  try {
+    await processWhatsAppMessages(body)
+  } catch (err) {
+    console.error("[WhatsApp Webhook] Processing error:", err)
+  }
 
-  if (crmResult.status === "rejected") {
-    console.error("[WhatsApp Webhook] CRM processing error:", crmResult.reason)
-  }
-  if (agentResult.status === "rejected") {
-    console.error("[WhatsApp Webhook] Agent forward error:", agentResult.reason)
-  }
+  // Note: MyClaw agent receives messages directly via WhatsApp Web,
+  // so no forward is needed. The CRM only records the interaction.
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
 }
 
 // ---------------------------------------------------------------------------
-// Background processing
+// CRM Processing
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processWhatsAppMessages(body: any) {
   const messages = parseWhatsAppWebhook(body)
 
@@ -92,8 +88,7 @@ async function processWhatsAppMessages(body: any) {
         .limit(1)
 
       if (existing && existing.length > 0) {
-        console.log("[WhatsApp] Duplicate message skipped:", msg.messageId)
-        continue
+        continue // Duplicate, skip
       }
 
       // --- Upsert contact by whatsapp_phone ---
@@ -107,7 +102,6 @@ async function processWhatsAppMessages(body: any) {
 
       if (existingContact && existingContact.length > 0) {
         contactId = existingContact[0].id
-        // Update last interaction timestamp
         await supabase
           .from("crm_contacts")
           .update({ updated_at: new Date().toISOString() })
@@ -167,37 +161,9 @@ async function processWhatsAppMessages(body: any) {
         continue
       }
 
-      console.log("[WhatsApp] Interaction created for contact:", contactId)
+      console.log("[WhatsApp] Message recorded for contact:", contactId)
     } catch (error) {
       console.error("[WhatsApp] Message processing error:", error)
     }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Forward webhook payload to OpenAI agent
-// ---------------------------------------------------------------------------
-
-async function forwardToAgent(rawBody: string) {
-  const agentUrl = process.env.OPENAI_AGENT_WEBHOOK_URL
-  if (!agentUrl) {
-    console.log("[WhatsApp] No OPENAI_AGENT_WEBHOOK_URL configured, skipping forward")
-    return
-  }
-
-  try {
-    const response = await fetch(agentUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: rawBody,
-    })
-
-    if (response.ok) {
-      console.log("[WhatsApp] Forwarded to agent successfully")
-    } else {
-      console.warn("[WhatsApp] Agent forward failed:", response.status, await response.text().catch(() => ""))
-    }
-  } catch (error) {
-    console.error("[WhatsApp] Agent forward error:", error)
   }
 }
