@@ -50,15 +50,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process messages in CRM then forward to OpenAI agent
-  processWhatsAppMessages(body).catch((err) =>
-    console.error("[WhatsApp Webhook] Processing error:", err)
-  )
+  // Run CRM processing and agent forward in parallel, AWAIT both before returning
+  // Vercel kills the process after response, so we must await here
+  const [crmResult, agentResult] = await Promise.allSettled([
+    processWhatsAppMessages(body),
+    forwardToAgent(rawBody),
+  ])
 
-  // Forward the original payload to the OpenAI agent so it can respond
-  forwardToAgent(rawBody).catch((err) =>
-    console.error("[WhatsApp Webhook] Agent forward error:", err)
-  )
+  if (crmResult.status === "rejected") {
+    console.error("[WhatsApp Webhook] CRM processing error:", crmResult.reason)
+  }
+  if (agentResult.status === "rejected") {
+    console.error("[WhatsApp Webhook] Agent forward error:", agentResult.reason)
+  }
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
 }
