@@ -50,10 +50,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process messages in background-like fashion but still return 200 promptly
-  // We use a non-blocking approach with fire-and-forget
+  // Process messages in CRM then forward to OpenAI agent
   processWhatsAppMessages(body).catch((err) =>
     console.error("[WhatsApp Webhook] Processing error:", err)
+  )
+
+  // Forward the original payload to the OpenAI agent so it can respond
+  forwardToAgent(rawBody).catch((err) =>
+    console.error("[WhatsApp Webhook] Agent forward error:", err)
   )
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
@@ -163,5 +167,33 @@ async function processWhatsAppMessages(body: any) {
     } catch (error) {
       console.error("[WhatsApp] Message processing error:", error)
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Forward webhook payload to OpenAI agent
+// ---------------------------------------------------------------------------
+
+async function forwardToAgent(rawBody: string) {
+  const agentUrl = process.env.OPENAI_AGENT_WEBHOOK_URL
+  if (!agentUrl) {
+    console.log("[WhatsApp] No OPENAI_AGENT_WEBHOOK_URL configured, skipping forward")
+    return
+  }
+
+  try {
+    const response = await fetch(agentUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: rawBody,
+    })
+
+    if (response.ok) {
+      console.log("[WhatsApp] Forwarded to agent successfully")
+    } else {
+      console.warn("[WhatsApp] Agent forward failed:", response.status, await response.text().catch(() => ""))
+    }
+  } catch (error) {
+    console.error("[WhatsApp] Agent forward error:", error)
   }
 }
