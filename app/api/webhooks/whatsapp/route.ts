@@ -49,17 +49,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process messages in CRM (await to ensure completion before Vercel kills process)
-  try {
-    await processWhatsAppMessages(body)
-  } catch (err) {
-    console.error("[WhatsApp Webhook] Processing error:", err)
+  // Process in CRM AND forward to MyClaw agent in parallel
+  // MyClaw uses Meta Cloud API via ngrok tunnel, so we must forward the payload
+  const [crmResult, agentResult] = await Promise.allSettled([
+    processWhatsAppMessages(body),
+    forwardToAgent(rawBody),
+  ])
+
+  if (crmResult.status === "rejected") {
+    console.error("[WhatsApp Webhook] CRM error:", crmResult.reason)
+  }
+  if (agentResult.status === "rejected") {
+    console.error("[WhatsApp Webhook] Agent forward error:", agentResult.reason)
   }
 
-  // Note: MyClaw agent receives messages directly via WhatsApp Web,
-  // so no forward is needed. The CRM only records the interaction.
-
   return NextResponse.json({ status: "ok" }, { status: 200 })
+}
+
+// ---------------------------------------------------------------------------
+// Forward to MyClaw agent (via ngrok tunnel)
+// ---------------------------------------------------------------------------
+
+async function forwardToAgent(rawBody: string) {
+  const agentUrl = process.env.OPENAI_AGENT_WEBHOOK_URL
+  if (!agentUrl) {
+    return
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000) // 8s timeout
+
+  try {
+    const response = await fetch(agentUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: rawBody,
+      signal: controller.signal,
+    })
+    console.log("[WhatsApp] Forwarded to agent:", response.status)
+  } catch (error) {
+    console.error("[WhatsApp] Agent forward failed:", error)
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // ---------------------------------------------------------------------------
