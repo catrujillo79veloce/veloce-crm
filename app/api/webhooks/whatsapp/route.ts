@@ -1,31 +1,30 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
-import { parseWhatsAppWebhook } from "@/lib/integrations/whatsapp"
+import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
 import { normalizePhone } from "@/lib/utils"
+import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 
 // ---------------------------------------------------------------------------
-// GET - Webhook verification (Meta sends this during setup)
+// GET - Webhook verification
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
-
   const mode = searchParams.get("hub.mode")
   const token = searchParams.get("hub.verify_token")
   const challenge = searchParams.get("hub.challenge")
 
   if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    console.log("[WhatsApp Webhook] Verification successful")
+    console.log("[WhatsApp] Verification successful")
     return new NextResponse(challenge, { status: 200 })
   }
 
-  console.warn("[WhatsApp Webhook] Verification failed - token mismatch")
   return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 }
 
 // ---------------------------------------------------------------------------
-// POST - Receive inbound WhatsApp messages
+// POST - Receive messages, save to CRM, generate AI response, send reply
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -36,75 +35,35 @@ export async function POST(request: NextRequest) {
   const appSecret = process.env.WHATSAPP_APP_SECRET ?? ""
 
   if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
-    console.warn("[WhatsApp Webhook] Invalid signature")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
-  // Parse body
-  let body: Record<string, unknown>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any
   try {
     body = JSON.parse(rawBody)
   } catch {
-    console.error("[WhatsApp Webhook] Invalid JSON body")
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process in CRM AND forward to MyClaw agent in parallel
-  // MyClaw uses Meta Cloud API via ngrok tunnel, so we must forward the payload
-  const [crmResult, agentResult] = await Promise.allSettled([
-    processWhatsAppMessages(body),
-    forwardToAgent(rawBody),
-  ])
-
-  if (crmResult.status === "rejected") {
-    console.error("[WhatsApp Webhook] CRM error:", crmResult.reason)
-  }
-  if (agentResult.status === "rejected") {
-    console.error("[WhatsApp Webhook] Agent forward error:", agentResult.reason)
+  // Process: save to CRM + generate AI response + send reply
+  try {
+    await processAndReply(body)
+  } catch (err) {
+    console.error("[WhatsApp] Processing error:", err)
   }
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
 }
 
 // ---------------------------------------------------------------------------
-// Forward to MyClaw agent (via ngrok tunnel)
-// ---------------------------------------------------------------------------
-
-async function forwardToAgent(rawBody: string) {
-  const agentUrl = process.env.OPENAI_AGENT_WEBHOOK_URL
-  if (!agentUrl) {
-    return
-  }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 8000) // 8s timeout
-
-  try {
-    const response = await fetch(agentUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: rawBody,
-      signal: controller.signal,
-    })
-    console.log("[WhatsApp] Forwarded to agent:", response.status)
-  } catch (error) {
-    console.error("[WhatsApp] Agent forward failed:", error)
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// CRM Processing
+// Main processing: CRM + AI Agent + Reply
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function processWhatsAppMessages(body: any) {
+async function processAndReply(body: any) {
   const messages = parseWhatsAppWebhook(body)
-
-  if (messages.length === 0) {
-    return
-  }
+  if (messages.length === 0) return
 
   const supabase = createAdminClient()
 
@@ -112,18 +71,16 @@ async function processWhatsAppMessages(body: any) {
     try {
       const normalizedPhone = normalizePhone(msg.phone)
 
-      // --- Deduplication: check channel_message_id ---
+      // --- Deduplication ---
       const { data: existing } = await supabase
         .from("crm_interactions")
         .select("id")
         .eq("channel_message_id", msg.messageId)
         .limit(1)
 
-      if (existing && existing.length > 0) {
-        continue // Duplicate, skip
-      }
+      if (existing && existing.length > 0) continue
 
-      // --- Upsert contact by whatsapp_phone ---
+      // --- Upsert contact ---
       let contactId: string
 
       const { data: existingContact } = await supabase
@@ -139,7 +96,6 @@ async function processWhatsAppMessages(body: any) {
           .update({ updated_at: new Date().toISOString() })
           .eq("id", contactId)
       } else {
-        // Create new contact
         const firstName = msg.senderName?.split(" ")[0] ?? normalizedPhone
         const lastName = msg.senderName?.split(" ").slice(1).join(" ") ?? ""
 
@@ -162,40 +118,65 @@ async function processWhatsAppMessages(body: any) {
           console.error("[WhatsApp] Contact creation failed:", contactError)
           continue
         }
-
         contactId = newContact.id
-        console.log("[WhatsApp] New contact created:", contactId)
+        console.log("[WhatsApp] New contact:", contactId)
       }
 
-      // --- Create interaction ---
+      // --- Save inbound message ---
       const occurredAt = msg.timestamp
         ? new Date(parseInt(msg.timestamp) * 1000).toISOString()
         : new Date().toISOString()
 
-      const { error: interactionError } = await supabase
+      await supabase.from("crm_interactions").insert({
+        contact_id: contactId,
+        type: "whatsapp_message",
+        direction: "inbound",
+        body: msg.message,
+        channel_message_id: msg.messageId,
+        channel_metadata: { phone: msg.phone, sender_name: msg.senderName ?? null },
+        occurred_at: occurredAt,
+      })
+
+      console.log("[WhatsApp] Inbound saved for:", contactId)
+
+      // --- Get conversation history for context ---
+      const { data: history } = await supabase
         .from("crm_interactions")
-        .insert({
+        .select("direction, body")
+        .eq("contact_id", contactId)
+        .eq("type", "whatsapp_message")
+        .order("occurred_at", { ascending: true })
+        .limit(10)
+
+      const conversationHistory = (history ?? [])
+        .filter((h) => h.body)
+        .map((h) => ({
+          role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
+          content: h.body as string,
+        }))
+
+      // --- Generate AI response ---
+      const aiResponse = await generateAgentResponse(msg.message, conversationHistory)
+
+      // --- Send reply via WhatsApp API ---
+      const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)
+
+      if (sent) {
+        // Save outbound message in CRM
+        await supabase.from("crm_interactions").insert({
           contact_id: contactId,
           type: "whatsapp_message",
-          direction: "inbound",
-          subject: null,
-          body: msg.message,
-          channel_message_id: msg.messageId,
-          channel_metadata: {
-            phone: msg.phone,
-            sender_name: msg.senderName ?? null,
-          },
-          occurred_at: occurredAt,
+          direction: "outbound",
+          body: aiResponse,
+          channel_metadata: { ai_generated: true },
+          occurred_at: new Date().toISOString(),
         })
-
-      if (interactionError) {
-        console.error("[WhatsApp] Interaction creation failed:", interactionError)
-        continue
+        console.log("[WhatsApp] AI replied to:", contactId)
+      } else {
+        console.error("[WhatsApp] Failed to send reply to:", normalizedPhone)
       }
-
-      console.log("[WhatsApp] Message recorded for contact:", contactId)
     } catch (error) {
-      console.error("[WhatsApp] Message processing error:", error)
+      console.error("[WhatsApp] Error:", error)
     }
   }
 }
