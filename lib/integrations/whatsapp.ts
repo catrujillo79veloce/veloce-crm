@@ -1,4 +1,4 @@
-const GRAPH_API_VERSION = "v19.0"
+const GRAPH_API_VERSION = "v25.0"
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 
 // ---------------------------------------------------------------------------
@@ -18,6 +18,8 @@ export async function sendWhatsAppMessage(
   }
 
   try {
+    // Strip + from phone number (Meta requires format like 573176354893)
+    const cleanTo = to.replace(/\+/g, "")
     const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`
     const response = await fetch(url, {
       method: "POST",
@@ -28,7 +30,7 @@ export async function sendWhatsAppMessage(
       body: JSON.stringify({
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to,
+        to: cleanTo,
         type: "text",
         text: { body: message },
       }),
