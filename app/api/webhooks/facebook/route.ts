@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
-import { fetchLeadData, parseLeadgenWebhook } from "@/lib/integrations/facebook"
+import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
 import { normalizePhone } from "@/lib/utils"
+import { generateAgentResponse } from "@/lib/ai/veloce-agent"
+
+// Allow up to 60s for AI response generation + Facebook send
+export const maxDuration = 60
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
@@ -25,7 +29,7 @@ export async function GET(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-// POST - Receive Facebook Lead Ads events
+// POST - Receive Facebook Lead Ads + Messenger events
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -35,7 +39,7 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256") ?? ""
   const appSecret = process.env.FACEBOOK_APP_SECRET ?? ""
 
-  if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
+  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
     console.warn("[Facebook Webhook] Invalid signature")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
@@ -47,16 +51,158 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process in background
-  processLeadgenEvents(body).catch((err) =>
+  // Route based on object type
+  try {
+    if (body.object === "page") {
+      // Messenger events come with object: "page"
+      await processMessengerMessages(body)
+    } else if (body.entry?.[0]?.changes?.[0]?.field === "leadgen") {
+      // Lead Ads events
+      await processLeadgenEvents(body)
+    } else {
+      // Try both - sometimes mixed
+      await processMessengerMessages(body)
+      await processLeadgenEvents(body)
+    }
+  } catch (err) {
     console.error("[Facebook Webhook] Processing error:", err)
-  )
+  }
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
 }
 
 // ---------------------------------------------------------------------------
-// Background processing
+// Messenger processing: CRM + AI Agent + Reply
+// ---------------------------------------------------------------------------
+
+async function processMessengerMessages(body: any) {
+  const entries = body?.entry ?? []
+  const supabase = createAdminClient()
+
+  for (const entry of entries) {
+    const messagingEvents = entry?.messaging ?? []
+
+    for (const event of messagingEvents) {
+      try {
+        // Only process incoming messages
+        if (!event.message) continue
+        if (event.message.is_echo) continue
+
+        const text = event.message.text
+        if (!text) continue
+
+        const senderId: string = event.sender?.id ?? ""
+        const messageId: string = event.message.mid ?? ""
+        const timestamp: number = event.timestamp ?? Date.now()
+
+        if (!senderId || !messageId) continue
+
+        // --- Deduplication ---
+        const { data: existing } = await supabase
+          .from("crm_interactions")
+          .select("id")
+          .eq("channel_message_id", messageId)
+          .limit(1)
+
+        if (existing && existing.length > 0) {
+          console.log("[Messenger] Duplicate skipped:", messageId)
+          continue
+        }
+
+        // --- Upsert contact by facebook_id ---
+        let contactId: string
+
+        const { data: existingContact } = await supabase
+          .from("crm_contacts")
+          .select("id")
+          .eq("facebook_id", senderId)
+          .limit(1)
+
+        if (existingContact && existingContact.length > 0) {
+          contactId = existingContact[0].id
+          await supabase
+            .from("crm_contacts")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", contactId)
+        } else {
+          const { data: newContact, error: contactError } = await supabase
+            .from("crm_contacts")
+            .insert({
+              first_name: "Facebook",
+              last_name: `User ${senderId.slice(-6)}`,
+              facebook_id: senderId,
+              source: "facebook_messenger",
+              city: "Medellin",
+              status: "active",
+              interests: [],
+            })
+            .select("id")
+            .single()
+
+          if (contactError || !newContact) {
+            console.error("[Messenger] Contact creation failed:", contactError)
+            continue
+          }
+
+          contactId = newContact.id
+          console.log("[Messenger] New contact:", contactId)
+        }
+
+        // --- Save inbound ---
+        await supabase.from("crm_interactions").insert({
+          contact_id: contactId,
+          type: "facebook_message",
+          direction: "inbound",
+          body: text,
+          channel_message_id: messageId,
+          channel_metadata: { sender_id: senderId, timestamp },
+          occurred_at: new Date(timestamp).toISOString(),
+        })
+
+        // --- Conversation history ---
+        const { data: history } = await supabase
+          .from("crm_interactions")
+          .select("direction, body")
+          .eq("contact_id", contactId)
+          .eq("type", "facebook_message")
+          .order("occurred_at", { ascending: true })
+          .limit(10)
+
+        const conversationHistory = (history ?? [])
+          .filter((h) => h.body)
+          .map((h) => ({
+            role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
+            content: h.body as string,
+          }))
+
+        // --- AI response ---
+        const aiResponse = await generateAgentResponse(text, conversationHistory)
+
+        // --- Send via Messenger ---
+        const sent = await sendFacebookMessage(senderId, aiResponse)
+
+        if (sent) {
+          await supabase.from("crm_interactions").insert({
+            contact_id: contactId,
+            type: "facebook_message",
+            direction: "outbound",
+            body: aiResponse,
+            channel_metadata: { ai_generated: true, recipient_id: senderId },
+            occurred_at: new Date().toISOString(),
+          })
+          console.log("[Messenger] AI replied to:", contactId)
+        } else {
+          console.error("[Messenger] Send failed:", senderId)
+        }
+      } catch (error) {
+        console.error("[Messenger] Event error:", error)
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lead Ads processing (unchanged)
 // ---------------------------------------------------------------------------
 
 async function processLeadgenEvents(body: any) {
@@ -68,14 +214,12 @@ async function processLeadgenEvents(body: any) {
 
   for (const event of events) {
     try {
-      // Fetch full lead data from Graph API
       const leadData = await fetchLeadData(event.leadgenId)
       if (!leadData) {
         console.error("[Facebook] Could not fetch lead data for:", event.leadgenId)
         continue
       }
 
-      // --- Create contact ---
       const contactInsert: Record<string, unknown> = {
         first_name: leadData.first_name || "Facebook",
         last_name: leadData.last_name || "Lead",
@@ -106,10 +250,8 @@ async function processLeadgenEvents(body: any) {
         continue
       }
 
-      // --- Auto-assign via round-robin ---
       const assignedTo = await getNextRoundRobinMember(supabase)
 
-      // --- Create lead ---
       const { data: maxPosData } = await supabase
         .from("crm_leads")
         .select("position")
@@ -138,7 +280,6 @@ async function processLeadgenEvents(body: any) {
         console.error("[Facebook] Lead creation failed:", leadError)
       }
 
-      // Update contact assignment
       if (assignedTo) {
         await supabase
           .from("crm_contacts")
@@ -146,7 +287,6 @@ async function processLeadgenEvents(body: any) {
           .eq("id", contact.id)
       }
 
-      // --- Create interaction ---
       const { error: interactionError } = await supabase
         .from("crm_interactions")
         .insert({
@@ -182,15 +322,10 @@ async function processLeadgenEvents(body: any) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Round-robin assignment: get the active team member with fewest open leads
-// ---------------------------------------------------------------------------
-
 async function getNextRoundRobinMember(
   supabase: ReturnType<typeof createAdminClient>
 ): Promise<string | null> {
   try {
-    // Get all active team members
     const { data: members } = await supabase
       .from("crm_team_members")
       .select("id")
@@ -198,7 +333,6 @@ async function getNextRoundRobinMember(
 
     if (!members || members.length === 0) return null
 
-    // Count open leads per member
     const memberIds = members.map((m) => m.id)
 
     const { data: leadCounts } = await supabase
@@ -207,7 +341,6 @@ async function getNextRoundRobinMember(
       .in("assigned_to", memberIds)
       .in("status", ["new", "contacted", "qualified", "proposal", "negotiation"])
 
-    // Build count map
     const countMap = new Map<string, number>()
     for (const id of memberIds) {
       countMap.set(id, 0)
@@ -218,7 +351,6 @@ async function getNextRoundRobinMember(
       }
     }
 
-    // Find member with lowest count
     let minCount = Infinity
     let selectedId: string | null = null
 

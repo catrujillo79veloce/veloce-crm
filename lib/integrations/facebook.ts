@@ -2,6 +2,47 @@ const GRAPH_API_VERSION = "v19.0"
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 
 // ---------------------------------------------------------------------------
+// Send a Facebook Messenger message via the Graph API
+// ---------------------------------------------------------------------------
+
+export async function sendFacebookMessage(
+  recipientId: string,
+  message: string
+): Promise<boolean> {
+  const accessToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
+
+  if (!accessToken) {
+    console.error("[Facebook] Missing FACEBOOK_PAGE_ACCESS_TOKEN")
+    return false
+  }
+
+  try {
+    const url = `${GRAPH_API_BASE}/me/messages?access_token=${accessToken}`
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        message: { text: message },
+        messaging_type: "RESPONSE",
+      }),
+    })
+
+    if (!response.ok) {
+      const err = await response.text()
+      console.error("[Facebook] Send message failed:", response.status, err)
+      return false
+    }
+
+    console.log("[Facebook] Message sent to:", recipientId)
+    return true
+  } catch (error) {
+    console.error("[Facebook] Send message exception:", error)
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fetch full lead data from a Facebook Lead Ads leadgen_id
 // ---------------------------------------------------------------------------
 
