@@ -11,8 +11,16 @@ import { ContactTimeline } from "./ContactTimeline"
 import { ContactDeals } from "./ContactDeals"
 import { ContactLeads } from "./ContactLeads"
 import { ContactNotes } from "./ContactNotes"
+import { ContactQuickActions } from "./ContactQuickActions"
 import { useI18n } from "@/lib/i18n/config"
 import type { Contact, Interaction, Deal, Lead, Note } from "@/lib/types"
+
+interface TeamMemberOption {
+  id: string
+  full_name: string
+  email: string
+  avatar_url: string | null
+}
 
 interface ContactDetailViewProps {
   contact: Contact
@@ -21,6 +29,7 @@ interface ContactDetailViewProps {
   deals: Deal[]
   leads: Lead[]
   notes: Note[]
+  teamMembers: TeamMemberOption[]
 }
 
 export function ContactDetailView({
@@ -30,14 +39,16 @@ export function ContactDetailView({
   deals,
   leads,
   notes,
+  teamMembers,
 }: ContactDetailViewProps) {
   const { t } = useI18n()
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      {/* Left column - info panel */}
-      <div className="lg:col-span-1">
+      {/* Left column - info panel + quick actions */}
+      <div className="lg:col-span-1 space-y-4">
         <ContactInfoPanel contact={contact} />
+        <ContactQuickActions contact={contact} teamMembers={teamMembers} />
       </div>
 
       {/* Right column - tabs */}

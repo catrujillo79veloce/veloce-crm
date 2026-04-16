@@ -548,6 +548,31 @@ export async function getTeamMembers() {
 }
 
 // ---------------------------------------------------------------------------
+// updateContactStatus - quick status change (without full form)
+// ---------------------------------------------------------------------------
+
+export async function updateContactStatus(
+  id: string,
+  status: ContactStatus
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = createServerSupabaseClient()
+
+  const { error } = await supabase
+    .from("crm_contacts")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", id)
+
+  if (error) {
+    console.error("updateContactStatus error:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidatePath(`/contacts/${id}`)
+  revalidatePath("/contacts")
+  return { success: true }
+}
+
+// ---------------------------------------------------------------------------
 // getTags - helper for filters
 // ---------------------------------------------------------------------------
 
