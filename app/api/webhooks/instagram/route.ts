@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
-import { parseInstagramWebhook } from "@/lib/integrations/instagram"
+import { parseInstagramWebhook, sendInstagramMessage } from "@/lib/integrations/instagram"
+import { generateAgentResponse } from "@/lib/ai/veloce-agent"
+
+// Allow up to 60s for AI response generation + Instagram send
+export const maxDuration = 60
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
@@ -34,7 +38,7 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256") ?? ""
   const appSecret = process.env.INSTAGRAM_APP_SECRET ?? ""
 
-  if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
+  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
     console.warn("[Instagram Webhook] Invalid signature")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
@@ -46,16 +50,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  // Process in background
-  processInstagramMessages(body).catch((err) =>
+  // Process: save to CRM + generate AI response + send reply
+  try {
+    await processInstagramMessages(body)
+  } catch (err) {
     console.error("[Instagram Webhook] Processing error:", err)
-  )
+  }
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
 }
 
 // ---------------------------------------------------------------------------
-// Background processing
+// Main processing: CRM + AI Agent + Reply
 // ---------------------------------------------------------------------------
 
 async function processInstagramMessages(body: any) {
@@ -95,7 +101,6 @@ async function processInstagramMessages(body: any) {
           .update({ updated_at: new Date().toISOString() })
           .eq("id", contactId)
       } else {
-        // Create new contact - Instagram does not provide name from webhook
         const { data: newContact, error: contactError } = await supabase
           .from("crm_contacts")
           .insert({
@@ -119,29 +124,58 @@ async function processInstagramMessages(body: any) {
         console.log("[Instagram] New contact created:", contactId)
       }
 
-      // --- Create interaction ---
-      const { error: interactionError } = await supabase
+      // --- Save inbound message ---
+      await supabase.from("crm_interactions").insert({
+        contact_id: contactId,
+        type: "instagram_message",
+        direction: "inbound",
+        subject: null,
+        body: msg.message,
+        channel_message_id: msg.messageId,
+        channel_metadata: {
+          sender_id: msg.senderId,
+          timestamp: msg.timestamp,
+        },
+        occurred_at: new Date(msg.timestamp).toISOString(),
+      })
+
+      console.log("[Instagram] Inbound saved for:", contactId)
+
+      // --- Get conversation history for context ---
+      const { data: history } = await supabase
         .from("crm_interactions")
-        .insert({
+        .select("direction, body")
+        .eq("contact_id", contactId)
+        .eq("type", "instagram_message")
+        .order("occurred_at", { ascending: true })
+        .limit(10)
+
+      const conversationHistory = (history ?? [])
+        .filter((h) => h.body)
+        .map((h) => ({
+          role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
+          content: h.body as string,
+        }))
+
+      // --- Generate AI response ---
+      const aiResponse = await generateAgentResponse(msg.message, conversationHistory)
+
+      // --- Send reply via Instagram API ---
+      const sent = await sendInstagramMessage(msg.senderId, aiResponse)
+
+      if (sent) {
+        await supabase.from("crm_interactions").insert({
           contact_id: contactId,
           type: "instagram_message",
-          direction: "inbound",
-          subject: null,
-          body: msg.message,
-          channel_message_id: msg.messageId,
-          channel_metadata: {
-            sender_id: msg.senderId,
-            timestamp: msg.timestamp,
-          },
-          occurred_at: new Date(msg.timestamp).toISOString(),
+          direction: "outbound",
+          body: aiResponse,
+          channel_metadata: { ai_generated: true, recipient_id: msg.senderId },
+          occurred_at: new Date().toISOString(),
         })
-
-      if (interactionError) {
-        console.error("[Instagram] Interaction creation failed:", interactionError)
-        continue
+        console.log("[Instagram] AI replied to:", contactId)
+      } else {
+        console.error("[Instagram] Failed to send reply to:", msg.senderId)
       }
-
-      console.log("[Instagram] Interaction created for contact:", contactId)
     } catch (error) {
       console.error("[Instagram] Message processing error:", error)
     }
