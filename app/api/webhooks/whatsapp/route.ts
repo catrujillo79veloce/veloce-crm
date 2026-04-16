@@ -5,6 +5,9 @@ import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/wh
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 
+// Allow up to 60s for AI response generation + WhatsApp send
+export const maxDuration = 60
+
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
 // ---------------------------------------------------------------------------
