@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   const checks: Record<string, string> = {}
 
@@ -18,7 +20,7 @@ export async function GET() {
     if (!val) {
       checks[v] = "MISSING"
     } else {
-      checks[v] = `OK (${val.substring(0, 4)}...${val.substring(val.length - 4)})`
+      checks[v] = `OK (${val.substring(0, 15)}...${val.substring(val.length - 6)})`
     }
   }
 
