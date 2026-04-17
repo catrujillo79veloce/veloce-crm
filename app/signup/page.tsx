@@ -84,6 +84,13 @@ export default function SignupPage() {
             <p className="text-sm text-gray-600 mb-4">
               Revisa tu correo <strong>{email}</strong> para confirmar la cuenta.
             </p>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 text-left mb-4">
+              <p className="font-medium mb-1">ℹ️ Importante</p>
+              <p>
+                Tu cuenta está pendiente de aprobación. Un administrador debe
+                darte acceso al CRM antes de que puedas ingresar.
+              </p>
+            </div>
             <p className="text-xs text-gray-400">
               Redirigiendo al login en unos segundos...
             </p>
