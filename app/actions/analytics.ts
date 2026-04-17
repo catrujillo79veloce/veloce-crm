@@ -2,6 +2,113 @@
 
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 
+// ---------------------------------------------------------------------------
+// Team performance (analytics per sales rep)
+// ---------------------------------------------------------------------------
+
+export interface TeamMemberPerformance {
+  id: string
+  full_name: string
+  email: string
+  avatar_url: string | null
+  role: string
+  active_leads: number
+  won_deals_mtd: number
+  won_revenue_mtd: number
+  open_deals: number
+  open_pipeline_value: number
+  pending_tasks: number
+  conversion_rate: number
+}
+
+export async function getTeamPerformance(): Promise<TeamMemberPerformance[]> {
+  const supabase = createServerSupabaseClient()
+  const startOfMonth = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    1
+  ).toISOString()
+
+  const { data: members } = await supabase
+    .from("crm_team_members")
+    .select("id, full_name, email, avatar_url, role")
+    .eq("is_active", true)
+
+  if (!members || members.length === 0) return []
+
+  const results: TeamMemberPerformance[] = []
+
+  for (const m of members) {
+    const [
+      activeLeadsRes,
+      wonDealsMtdRes,
+      openDealsRes,
+      pendingTasksRes,
+      totalDealsRes,
+    ] = await Promise.all([
+      supabase
+        .from("crm_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("assigned_to", m.id)
+        .in("status", ["new", "contacted", "qualified", "proposal", "negotiation"]),
+      supabase
+        .from("crm_deals")
+        .select("amount")
+        .eq("assigned_to", m.id)
+        .eq("stage", "closed_won")
+        .gte("updated_at", startOfMonth),
+      supabase
+        .from("crm_deals")
+        .select("amount")
+        .eq("assigned_to", m.id)
+        .in("stage", ["qualification", "proposal", "negotiation"]),
+      supabase
+        .from("crm_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("assigned_to", m.id)
+        .neq("status", "done"),
+      supabase
+        .from("crm_deals")
+        .select("stage", { count: "exact" })
+        .eq("assigned_to", m.id)
+        .in("stage", ["closed_won", "closed_lost"]),
+    ])
+
+    const wonRevenue =
+      wonDealsMtdRes.data?.reduce(
+        (sum, d) => sum + (Number(d.amount) || 0),
+        0
+      ) ?? 0
+
+    const openPipeline =
+      openDealsRes.data?.reduce(
+        (sum, d) => sum + (Number(d.amount) || 0),
+        0
+      ) ?? 0
+
+    const totalClosed = totalDealsRes.count ?? 0
+    const won = totalDealsRes.data?.filter((d) => d.stage === "closed_won").length ?? 0
+    const conversionRate = totalClosed > 0 ? (won / totalClosed) * 100 : 0
+
+    results.push({
+      id: m.id,
+      full_name: m.full_name,
+      email: m.email,
+      avatar_url: m.avatar_url,
+      role: m.role,
+      active_leads: activeLeadsRes.count ?? 0,
+      won_deals_mtd: wonDealsMtdRes.data?.length ?? 0,
+      won_revenue_mtd: wonRevenue,
+      open_deals: openDealsRes.data?.length ?? 0,
+      open_pipeline_value: openPipeline,
+      pending_tasks: pendingTasksRes.count ?? 0,
+      conversion_rate: conversionRate,
+    })
+  }
+
+  return results.sort((a, b) => b.won_revenue_mtd - a.won_revenue_mtd)
+}
+
 export interface DashboardKPIs {
   newLeadsThisWeek: number
   closedDealsThisMonth: number
@@ -505,3 +612,4 @@ export async function getTeamLeaderboardData(): Promise<
 
   return results.sort((a, b) => b.total_revenue - a.total_revenue)
 }
+

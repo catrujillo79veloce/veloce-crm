@@ -4,9 +4,13 @@ import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
 import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
+import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 
 // Allow up to 60s for AI response generation + WhatsApp send
 export const maxDuration = 60
+
+// Admin phone to receive hot alerts
+const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
@@ -141,6 +145,20 @@ async function processAndReply(body: any) {
       })
 
       console.log("[WhatsApp] Inbound saved for:", contactId)
+
+      // --- HOT ALERT: notify admin if message shows buying intent ---
+      const detection = detectHotMessage(msg.message)
+      if (detection.isHot && ADMIN_PHONE !== normalizedPhone.replace(/\+/g, "")) {
+        const contactName = msg.senderName ?? normalizedPhone
+        sendHotAlert({
+          adminPhone: ADMIN_PHONE,
+          contactName,
+          contactId,
+          channel: "whatsapp",
+          message: msg.message,
+          detection,
+        }).catch((e) => console.error("[WhatsApp] Hot alert failed:", e))
+      }
 
       // --- Get conversation history for context ---
       const { data: history } = await supabase

@@ -3,9 +3,12 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
 import { parseInstagramWebhook, sendInstagramMessage } from "@/lib/integrations/instagram"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
+import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 
 // Allow up to 60s for AI response generation + Instagram send
 export const maxDuration = 60
+
+const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
@@ -140,6 +143,19 @@ async function processInstagramMessages(body: any) {
       })
 
       console.log("[Instagram] Inbound saved for:", contactId)
+
+      // --- HOT ALERT ---
+      const detection = detectHotMessage(msg.message)
+      if (detection.isHot) {
+        sendHotAlert({
+          adminPhone: ADMIN_PHONE,
+          contactName: `Instagram User ${msg.senderId.slice(-6)}`,
+          contactId,
+          channel: "instagram",
+          message: msg.message,
+          detection,
+        }).catch((e) => console.error("[Instagram] Hot alert failed:", e))
+      }
 
       // --- Get conversation history for context ---
       const { data: history } = await supabase

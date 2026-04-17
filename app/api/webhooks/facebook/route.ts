@@ -4,9 +4,12 @@ import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
 import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
+import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 
 // Allow up to 60s for AI response generation + Facebook send
 export const maxDuration = 60
+
+const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
@@ -159,6 +162,19 @@ async function processMessengerMessages(body: any) {
           channel_metadata: { sender_id: senderId, timestamp },
           occurred_at: new Date(timestamp).toISOString(),
         })
+
+        // --- HOT ALERT ---
+        const detection = detectHotMessage(text)
+        if (detection.isHot) {
+          sendHotAlert({
+            adminPhone: ADMIN_PHONE,
+            contactName: `Facebook User ${senderId.slice(-6)}`,
+            contactId,
+            channel: "facebook",
+            message: text,
+            detection,
+          }).catch((e) => console.error("[Messenger] Hot alert failed:", e))
+        }
 
         // --- Conversation history ---
         const { data: history } = await supabase

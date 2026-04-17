@@ -8,6 +8,7 @@ import TasksDueToday from "@/components/dashboard/TasksDueToday"
 import LeadFunnelChart from "@/components/dashboard/LeadFunnelChart"
 import RevenuePipelineChart from "@/components/dashboard/RevenuePipelineChart"
 import ChannelBreakdown from "@/components/dashboard/ChannelBreakdown"
+import TeamPerformance from "@/components/dashboard/TeamPerformance"
 import { useI18n } from "@/lib/i18n/config"
 import {
   getDashboardKPIs,
@@ -16,11 +17,13 @@ import {
   getLeadFunnelData,
   getRevenueData,
   getChannelPerformanceData,
+  getTeamPerformance,
   type RecentActivityItem,
   type TaskDueToday as TaskDueTodayType,
   type LeadFunnelItem,
   type RevenueDataPoint,
   type ChannelPerformanceItem,
+  type TeamMemberPerformance,
 } from "@/app/actions/analytics"
 
 export default function DashboardPage() {
@@ -31,12 +34,13 @@ export default function DashboardPage() {
   const [funnelData, setFunnelData] = useState<LeadFunnelItem[]>([])
   const [revenueData, setRevenueData] = useState<RevenueDataPoint[]>([])
   const [channelData, setChannelData] = useState<ChannelPerformanceItem[]>([])
+  const [teamData, setTeamData] = useState<TeamMemberPerformance[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [kpiData, activityData, tasksData, funnel, revenue, channels] =
+        const [kpiData, activityData, tasksData, funnel, revenue, channels, team] =
           await Promise.all([
             getDashboardKPIs(),
             getRecentActivity(10),
@@ -44,6 +48,7 @@ export default function DashboardPage() {
             getLeadFunnelData(),
             getRevenueData(6),
             getChannelPerformanceData(),
+            getTeamPerformance(),
           ])
 
         setKpis(kpiData)
@@ -52,6 +57,7 @@ export default function DashboardPage() {
         setFunnelData(funnel)
         setRevenueData(revenue)
         setChannelData(channels)
+        setTeamData(team)
       } catch (error) {
         console.error("Error loading dashboard data:", error)
       } finally {
@@ -134,6 +140,17 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Team Performance */}
+      {loading ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="h-[200px] flex items-center justify-center">
+            <div className="h-6 w-6 border-2 border-veloce-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        </div>
+      ) : (
+        <TeamPerformance team={teamData} />
+      )}
     </div>
   )
 }
