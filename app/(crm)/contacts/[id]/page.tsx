@@ -13,6 +13,7 @@ import {
   getContactNotes,
 } from "@/app/actions/contacts"
 import { getTeamMembers } from "@/app/actions/leads"
+import { getTags } from "@/app/actions/tags"
 import { ContactDetailView } from "@/components/contacts/ContactDetailView"
 import { Button } from "@/components/ui"
 
@@ -31,15 +32,23 @@ export async function generateMetadata({ params }: ContactDetailPageProps) {
 export default async function ContactDetailPage({
   params,
 }: ContactDetailPageProps) {
-  const [contact, interactionsResult, deals, leads, notes, teamMembers] =
-    await Promise.all([
-      getContact(params.id),
-      getContactInteractions(params.id, 1, 20),
-      getContactDeals(params.id),
-      getContactLeads(params.id),
-      getContactNotes(params.id),
-      getTeamMembers(),
-    ])
+  const [
+    contact,
+    interactionsResult,
+    deals,
+    leads,
+    notes,
+    teamMembers,
+    allTags,
+  ] = await Promise.all([
+    getContact(params.id),
+    getContactInteractions(params.id, 1, 20),
+    getContactDeals(params.id),
+    getContactLeads(params.id),
+    getContactNotes(params.id),
+    getTeamMembers(),
+    getTags(),
+  ])
 
   if (!contact) notFound()
 
@@ -102,6 +111,7 @@ export default async function ContactDetailPage({
         leads={leads}
         notes={notes}
         teamMembers={teamMembers}
+        allTags={allTags}
       />
     </div>
   )

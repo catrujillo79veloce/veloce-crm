@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useMemo } from "react"
 import Link from "next/link"
 import {
   Activity,
@@ -17,6 +18,8 @@ import {
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
 import type { RecentActivityItem } from "@/app/actions/analytics"
+
+type ChannelFilter = "all" | "whatsapp_message" | "instagram_message" | "facebook_message" | "other"
 
 const interactionIcons: Record<string, { icon: typeof Phone; color: string; bg: string }> = {
   call: { icon: Phone, color: "text-yellow-600", bg: "bg-yellow-50" },
@@ -46,8 +49,35 @@ interface RecentActivityProps {
   activities: RecentActivityItem[]
 }
 
+const CHANNEL_FILTERS: Array<{
+  value: ChannelFilter
+  label: string
+  icon: typeof MessageCircle | null
+  color: string
+}> = [
+  { value: "all", label: "Todo", icon: null, color: "text-gray-600" },
+  { value: "whatsapp_message", label: "WhatsApp", icon: MessageCircle, color: "text-green-600" },
+  { value: "instagram_message", label: "Instagram", icon: Camera, color: "text-pink-600" },
+  { value: "facebook_message", label: "Facebook", icon: MessageSquare, color: "text-blue-600" },
+]
+
 export default function RecentActivity({ activities }: RecentActivityProps) {
   const { t, locale } = useI18n()
+  const [filter, setFilter] = useState<ChannelFilter>("all")
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return activities
+    return activities.filter((a) => a.type === filter)
+  }, [activities, filter])
+
+  // Count per channel for badges
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const a of activities) {
+      c[a.type] = (c[a.type] ?? 0) + 1
+    }
+    return c
+  }, [activities])
 
   if (activities.length === 0) {
     return (
@@ -67,7 +97,7 @@ export default function RecentActivity({ activities }: RecentActivityProps) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Activity size={18} className="text-gray-400" />
           <h2 className="text-base font-semibold text-gray-900">
@@ -82,8 +112,43 @@ export default function RecentActivity({ activities }: RecentActivityProps) {
           <ArrowRight size={12} />
         </Link>
       </div>
+
+      {/* Channel filters */}
+      <div className="flex flex-wrap gap-1.5 mb-3 pb-3 border-b border-gray-100">
+        {CHANNEL_FILTERS.map((f) => {
+          const active = filter === f.value
+          const count =
+            f.value === "all"
+              ? activities.length
+              : counts[f.value] ?? 0
+          const Icon = f.icon
+          return (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setFilter(f.value)}
+              className={cn(
+                "text-xs px-2.5 py-1 rounded-full border transition flex items-center gap-1",
+                active
+                  ? "bg-veloce-50 border-veloce-300 text-veloce-700"
+                  : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+              )}
+            >
+              {Icon && <Icon size={11} className={active ? "" : f.color} />}
+              {f.label}
+              <span className="text-gray-400">({count})</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">
+          {locale === "es" ? "Sin actividad en este canal" : "No activity in this channel"}
+        </p>
+      ) : (
       <div className="space-y-1">
-        {activities.map((activity) => {
+        {filtered.map((activity) => {
           const config = interactionIcons[activity.type] || interactionIcons.note
           const Icon = config.icon
           const label = interactionLabels[activity.type]
@@ -133,6 +198,7 @@ export default function RecentActivity({ activities }: RecentActivityProps) {
           )
         })}
       </div>
+      )}
     </div>
   )
 }
