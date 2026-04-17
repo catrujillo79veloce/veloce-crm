@@ -40,8 +40,10 @@ export async function middleware(request: NextRequest) {
   }
 
   // Public routes
-  if (path === "/login") {
-    if (user) {
+  const publicRoutes = ["/login", "/signup", "/forgot-password", "/reset-password"]
+  if (publicRoutes.includes(path)) {
+    // Only redirect to dashboard if logged in AND path is login/signup
+    if (user && (path === "/login" || path === "/signup")) {
       const url = request.nextUrl.clone()
       url.pathname = "/dashboard"
       return NextResponse.redirect(url)

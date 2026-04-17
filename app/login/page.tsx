@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { useI18n } from "@/lib/i18n/config"
 import { Mail, Lock, Loader2, AlertCircle } from "lucide-react"
@@ -99,12 +100,20 @@ export default function LoginPage() {
 
             {/* Password */}
             <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-1.5"
-              >
-                {t.auth.password}
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  {t.auth.password}
+                </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-veloce-600 hover:text-veloce-700 transition-colors"
+                >
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -136,6 +145,19 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {/* Signup link */}
+          <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-600">
+              ¿No tienes cuenta?{" "}
+              <Link
+                href="/signup"
+                className="font-semibold text-veloce-600 hover:text-veloce-700 transition-colors"
+              >
+                Regístrate aquí
+              </Link>
+            </p>
+          </div>
         </div>
 
         {/* Footer */}
