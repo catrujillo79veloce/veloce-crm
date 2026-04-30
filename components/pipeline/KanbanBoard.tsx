@@ -27,10 +27,16 @@ export interface KanbanColumnData<T = unknown> {
   sumLabel?: string
 }
 
+export type DragHandleProps = {
+  ref: (el: HTMLElement | null) => void
+  listeners: Record<string, React.EventHandler<React.SyntheticEvent>> | undefined
+}
+
 export interface KanbanBoardProps<T extends { id: string }> {
   columns: KanbanColumnData<T>[]
   onCardMove: (cardId: string, newColumnId: string, newPosition: number) => void
-  renderCard: (item: T) => React.ReactNode
+  onCardClick?: (item: T) => void
+  renderCard: (item: T, dragHandle: DragHandleProps) => React.ReactNode
   renderOverlay?: (item: T) => React.ReactNode
   className?: string
 }
@@ -38,6 +44,7 @@ export interface KanbanBoardProps<T extends { id: string }> {
 export function KanbanBoard<T extends { id: string }>({
   columns,
   onCardMove,
+  onCardClick,
   renderCard,
   renderOverlay,
   className,
@@ -152,9 +159,7 @@ export function KanbanBoard<T extends { id: string }>({
         {columns.map((column) => (
           <DroppableColumn key={column.id} column={column} activeId={activeId}>
             {column.items.map((item) => (
-              <SortableCard key={item.id} id={item.id} isDragActive={activeId === item.id}>
-                {renderCard(item)}
-              </SortableCard>
+              <SortableCard key={item.id} id={item.id} isDragActive={activeId === item.id} renderCard={renderCard} item={item} onCardClick={onCardClick} />
             ))}
           </DroppableColumn>
         ))}
@@ -163,7 +168,7 @@ export function KanbanBoard<T extends { id: string }>({
       <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>
         {activeItem ? (
           <div className="rotate-[2deg] scale-105 cursor-grabbing">
-            {renderOverlay ? renderOverlay(activeItem) : renderCard(activeItem)}
+            {renderOverlay ? renderOverlay(activeItem) : renderCard(activeItem, { ref: () => {}, listeners: undefined })}
           </div>
         ) : null}
       </DragOverlay>
@@ -233,23 +238,31 @@ function DroppableColumn<T extends { id: string }>({
 
 /* ------ Sortable Card Wrapper ------ */
 
-function SortableCard({
+function SortableCard<T extends { id: string }>({
   id,
   isDragActive,
-  children,
+  renderCard,
+  item,
+  onCardClick,
 }: {
   id: string
   isDragActive: boolean
-  children: React.ReactNode
+  renderCard: (item: T, dragHandle: DragHandleProps) => React.ReactNode
+  item: T
+  onCardClick?: (item: T) => void
 }) {
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
   } = useSortable({ id })
+
+  const pointerStart = React.useRef({ x: 0, y: 0 })
+  const dragOccurred = React.useRef(false)
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -258,15 +271,41 @@ function SortableCard({
     pointerEvents: isDragActive && !isDragging ? "none" : undefined,
   }
 
+  const dragHandle: DragHandleProps = {
+    ref: setActivatorNodeRef,
+    listeners: listeners as DragHandleProps["listeners"],
+  }
+
+  const handlePointerDown = React.useCallback((e: React.PointerEvent) => {
+    pointerStart.current = { x: e.clientX, y: e.clientY }
+    dragOccurred.current = false
+  }, [])
+
+  const handlePointerMove = React.useCallback((e: React.PointerEvent) => {
+    const dx = e.clientX - pointerStart.current.x
+    const dy = e.clientY - pointerStart.current.y
+    if (Math.sqrt(dx * dx + dy * dy) > 6) {
+      dragOccurred.current = true
+    }
+  }, [])
+
+  const handleClick = React.useCallback(() => {
+    if (!dragOccurred.current) {
+      onCardClick?.(item)
+    }
+  }, [item, onCardClick])
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
       role="listitem"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onClick={handleClick}
     >
-      {children}
+      {renderCard(item, dragHandle)}
     </div>
   )
 }

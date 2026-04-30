@@ -1,19 +1,22 @@
 "use client"
 
 import React from "react"
-import { GripVertical, Clock } from "lucide-react"
+import { GripVertical, Clock, Pencil } from "lucide-react"
 import { cn, formatCurrency, getScoreColor } from "@/lib/utils"
 import { Avatar, Badge } from "@/components/ui"
 import { PRIORITIES } from "@/lib/constants"
 import type { Lead } from "@/lib/types"
 
+import type { DragHandleProps } from "./KanbanBoard"
+
 export interface KanbanCardProps {
   lead: Lead
   locale?: "es" | "en"
-  onClick?: () => void
+  onEdit?: () => void
+  dragHandle?: DragHandleProps
 }
 
-function KanbanCard({ lead, locale = "es", onClick }: KanbanCardProps) {
+function KanbanCard({ lead, locale = "es", onEdit, dragHandle }: KanbanCardProps) {
   const contactName = lead.contact
     ? `${lead.contact.first_name} ${lead.contact.last_name}`
     : "Sin contacto"
@@ -32,18 +35,31 @@ function KanbanCard({ lead, locale = "es", onClick }: KanbanCardProps) {
     <div
       className={cn(
         "group relative rounded-lg border border-gray-200 bg-white p-3 shadow-sm",
-        "cursor-grab transition-shadow",
-        "hover:shadow-md hover:border-gray-300",
-        "active:cursor-grabbing active:shadow-lg"
+        "transition-shadow hover:shadow-md hover:border-gray-300",
+        onEdit && "cursor-pointer"
       )}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      aria-label={`${lead.title} - ${contactName}`}
+      onClick={onEdit}
     >
-      {/* Drag handle indicator */}
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <GripVertical className="h-4 w-4 text-gray-300" />
+      {/* Top-right controls: drag handle (hover) + edit button (always visible) */}
+      <div className="absolute top-2 right-2 flex items-center gap-1">
+        {onEdit && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit() }}
+            className="p-0.5 rounded bg-white border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 shadow-sm"
+            title={locale === "es" ? "Editar lead" : "Edit lead"}
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        )}
+        <div
+          ref={dragHandle?.ref}
+          {...(dragHandle?.listeners ?? {})}
+          className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing p-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="h-4 w-4 text-gray-300" />
+        </div>
       </div>
 
       {/* Contact row */}
