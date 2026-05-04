@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
+import { signOut } from "@/app/actions/auth"
 
 interface NavItem {
   icon: React.ElementType
@@ -148,7 +149,18 @@ export default function Sidebar({ userName = "Usuario", userEmail = "", avatarUr
         )}
         {!collapsed && (
           <button
-            className="flex-shrink-0 p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+            onClick={() => signOut()}
+            className="flex-shrink-0 p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+            aria-label="Cerrar sesion"
+            title="Cerrar sesion"
+          >
+            <LogOut size={16} />
+          </button>
+        )}
+        {collapsed && (
+          <button
+            onClick={() => signOut()}
+            className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
             aria-label="Cerrar sesion"
             title="Cerrar sesion"
           >

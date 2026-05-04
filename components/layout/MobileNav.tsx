@@ -14,9 +14,11 @@ import {
   Package,
   BarChart3,
   Settings,
+  LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
+import { signOut } from "@/app/actions/auth"
 
 const mainTabs = [
   { icon: LayoutDashboard, labelKey: "dashboard" as const, href: "/dashboard" },
@@ -98,6 +100,15 @@ export default function MobileNav() {
                 </li>
               )
             })}
+            <li>
+              <button
+                onClick={() => signOut()}
+                className="flex flex-col items-center gap-1 rounded-lg px-2 py-3 text-xs w-full text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <LogOut size={20} className="text-red-400" />
+                <span className="font-medium">{locale === "es" ? "Salir" : "Sign out"}</span>
+              </button>
+            </li>
           </ul>
         </div>
       )}
