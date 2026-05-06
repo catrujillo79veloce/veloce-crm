@@ -42,7 +42,8 @@ export async function POST(request: NextRequest) {
   const appSecret = process.env.INSTAGRAM_APP_SECRET ?? ""
 
   if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
-    console.warn("[Instagram Webhook] Invalid signature")
+    // Debug: log signature prefix to understand mismatch pattern
+    console.warn("[Instagram Webhook] Invalid signature | sig_prefix:", signature.slice(0, 20), "| has_secret:", !!appSecret, "| body_len:", rawBody.length)
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
