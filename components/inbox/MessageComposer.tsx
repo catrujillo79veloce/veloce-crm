@@ -29,7 +29,7 @@ const CHANNEL_CONFIG: Record<
     label: "Instagram",
     icon: Camera,
     color: "text-pink-500",
-    canSend: false, // Placeholder - outbound not implemented yet
+    canSend: true,
   },
 }
 
@@ -61,48 +61,55 @@ export default function MessageComposer({
     if (!trimmed || sending) return
     setError("")
 
-    if (channelType === "whatsapp_message") {
-      setSending(true)
-      try {
-        const response = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contactId: contact.id,
-            message: trimmed,
-          }),
-        })
+    const apiEndpoint =
+      channelType === "whatsapp_message"
+        ? "/api/whatsapp/send"
+        : channelType === "instagram_message"
+          ? "/api/instagram/send"
+          : null
 
-        const result = await response.json()
+    if (!apiEndpoint) return
 
-        if (result.success) {
-          // Create a local interaction object for immediate UI update
-          const newInteraction: Interaction = {
-            id: `temp-${Date.now()}`,
-            contact_id: contact.id,
-            lead_id: null,
-            deal_id: null,
-            type: "whatsapp_message",
-            direction: "outbound",
-            subject: null,
-            body: trimmed,
-            channel_message_id: null,
-            channel_metadata: null,
-            team_member_id: null,
-            occurred_at: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-          }
-          onMessageSent(newInteraction)
-          setText("")
-          textareaRef.current?.focus()
-        } else {
-          setError(result.error || "Error al enviar")
+    setSending(true)
+    try {
+      const response = await fetch(apiEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactId: contact.id,
+          message: trimmed,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Create a local interaction object for immediate UI update
+        const newInteraction: Interaction = {
+          id: `temp-${Date.now()}`,
+          contact_id: contact.id,
+          lead_id: null,
+          deal_id: null,
+          type: channelType,
+          direction: "outbound",
+          subject: null,
+          body: trimmed,
+          channel_message_id: null,
+          channel_metadata: null,
+          team_member_id: null,
+          occurred_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
         }
-      } catch {
-        setError("Error de conexion")
-      } finally {
-        setSending(false)
+        onMessageSent(newInteraction)
+        setText("")
+        textareaRef.current?.focus()
+      } else {
+        setError(result.error || "Error al enviar")
       }
+    } catch {
+      setError("Error de conexion")
+    } finally {
+      setSending(false)
     }
   }, [text, sending, channelType, contact.id, onMessageSent])
 
