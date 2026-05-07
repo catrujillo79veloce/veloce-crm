@@ -12,7 +12,7 @@ const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------h
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -129,7 +129,7 @@ async function processInstagramMessages(body: any) {
       }
 
       // --- Save inbound message ---
-      await supabase.from("crm_interactions").insert({
+      const { error: inboundInsertError } = await supabase.from("crm_interactions").insert({
         contact_id: contactId,
         type: "instagram_message",
         direction: "inbound",
@@ -142,12 +142,17 @@ async function processInstagramMessages(body: any) {
         },
         occurred_at: new Date(msg.timestamp).toISOString(),
       })
-
+      if (inboundInsertError) {
+                // DB unique guard: concurrent process already handled this message
+                console.log("[Instagram] Duplicate webhook suppressed:", msg.messageId)
+                continue
+      }
+      
       console.log("[Instagram] Inbound saved for:", contactId)
 
       // --- HOT ALERT ---
       const detection = detectHotMessage(msg.message)
-      if (detection.isHot) {
+      if (detection.isHot) {h
         sendHotAlert({
           adminPhone: ADMIN_PHONE,
           contactName: `Instagram User ${msg.senderId.slice(-6)}`,
