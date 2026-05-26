@@ -5,16 +5,22 @@ const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 // Send a plain text WhatsApp message via the Cloud API
 // ---------------------------------------------------------------------------
 
+export interface SendResult {
+  ok: boolean
+  error?: string
+  errorCode?: number | string
+}
+
 export async function sendWhatsAppMessage(
   to: string,
   message: string
-): Promise<boolean> {
+): Promise<SendResult> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
 
   if (!phoneNumberId || !accessToken) {
     console.error("[WhatsApp] Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN")
-    return false
+    return { ok: false, error: "Credenciales de WhatsApp no configuradas" }
   }
 
   try {
@@ -37,17 +43,67 @@ export async function sendWhatsAppMessage(
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      console.error("[WhatsApp] Send message failed:", response.status, err)
-      return false
+      const raw = await response.text()
+      console.error("[WhatsApp] Send failed:", response.status, raw)
+      return { ok: false, ...parseMetaError(raw, response.status) }
     }
 
     const data = await response.json()
     console.log("[WhatsApp] Message sent, id:", data.messages?.[0]?.id)
-    return true
+    return { ok: true }
   } catch (error) {
     console.error("[WhatsApp] Send message exception:", error)
-    return false
+    return { ok: false, error: "Error de red contactando a WhatsApp" }
+  }
+}
+
+// Translate Meta Graph API errors into Spanish, user-friendly hints.
+function parseMetaError(
+  raw: string,
+  status: number
+): { error: string; errorCode?: number | string } {
+  try {
+    const json = JSON.parse(raw)
+    const code = json?.error?.code
+    const subcode = json?.error?.error_subcode
+    const message: string = json?.error?.message ?? ""
+
+    // 24h customer service window expired (WhatsApp)
+    if (code === 131047 || /24 hours/i.test(message)) {
+      return {
+        errorCode: code,
+        error:
+          "Pasaron mas de 24h desde el ultimo mensaje del cliente. WhatsApp solo permite plantillas aprobadas fuera de esa ventana.",
+      }
+    }
+    // Token expired / invalid
+    if (code === 190 || subcode === 463 || subcode === 467) {
+      return {
+        errorCode: code,
+        error: "Token de acceso de Meta expirado. Renuevalo en Business Manager.",
+      }
+    }
+    // Recipient not on WhatsApp / invalid number
+    if (code === 131026 || code === 131009) {
+      return {
+        errorCode: code,
+        error: "El numero no tiene WhatsApp o el formato es invalido.",
+      }
+    }
+    // Permission / scope missing
+    if (code === 10 || code === 200) {
+      return {
+        errorCode: code,
+        error: "Faltan permisos en el token (whatsapp_business_messaging).",
+      }
+    }
+    // Generic Meta error - return its message
+    if (message) {
+      return { errorCode: code, error: `Meta: ${message}` }
+    }
+    return { error: `HTTP ${status} desde Meta` }
+  } catch {
+    return { error: `HTTP ${status} desde Meta` }
   }
 }
 

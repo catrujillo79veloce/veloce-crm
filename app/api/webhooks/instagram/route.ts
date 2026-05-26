@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
+import {
+  verifyWebhookSignature,
+  computeExpectedSignature,
+} from "@/lib/integrations/webhook-verify"
 import { parseInstagramWebhook, sendInstagramMessage } from "@/lib/integrations/instagram"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
@@ -42,9 +45,22 @@ export async function POST(request: NextRequest) {
   const appSecret = process.env.INSTAGRAM_APP_SECRET ?? ""
 
   if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
-    console.warn("[Instagram Webhook] Invalid signature | sig:", signature.slice(0, 40), "| body_len:", rawBody.length)
-    // Temporary: bypass signature check to confirm message flow - REMOVE AFTER DEBUG
+    // Diagnostic: log received vs expected prefix so Carlos can compare
+    // and decide whether INSTAGRAM_APP_SECRET still needs fixing.
+    const expected = computeExpectedSignature(rawBody, appSecret)
+    console.warn(
+      "[Instagram Webhook] Sig mismatch | received:",
+      signature.slice(0, 24),
+      "| expected:",
+      expected.slice(0, 24),
+      "| body_len:",
+      rawBody.length
+    )
+    // TEMPORARY BYPASS — re-enable the line below once received == expected.
     // return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+  } else if (appSecret) {
+    // Optional: confirm in logs when signature does match
+    // console.log("[Instagram Webhook] Signature OK")
   }
 
   let body: any
@@ -185,7 +201,7 @@ async function processInstagramMessages(body: any) {
       // --- Send reply via Instagram API ---
       const sent = await sendInstagramMessage(msg.senderId, aiResponse)
 
-      if (sent) {
+      if (sent.ok) {
         await supabase.from("crm_interactions").insert({
           contact_id: contactId,
           type: "instagram_message",
@@ -196,7 +212,7 @@ async function processInstagramMessages(body: any) {
         })
         console.log("[Instagram] AI replied to:", contactId)
       } else {
-        console.error("[Instagram] Failed to send reply to:", msg.senderId)
+        console.error("[Instagram] Failed to send reply to:", msg.senderId, sent.error)
       }
     } catch (error) {
       console.error("[Instagram] Message processing error:", error)

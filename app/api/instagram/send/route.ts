@@ -71,11 +71,15 @@ export async function POST(request: NextRequest) {
     }
 
     // --- Send message ---
-    const sent = await sendInstagramMessage(contact.instagram_id, message.trim())
+    const result = await sendInstagramMessage(contact.instagram_id, message.trim())
 
-    if (!sent) {
+    if (!result.ok) {
       return NextResponse.json(
-        { success: false, error: "Error al enviar el mensaje por Instagram" },
+        {
+          success: false,
+          error: result.error ?? "Error al enviar el mensaje por Instagram",
+          errorCode: result.errorCode,
+        },
         { status: 502 }
       )
     }

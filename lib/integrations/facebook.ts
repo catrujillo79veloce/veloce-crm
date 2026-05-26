@@ -5,15 +5,21 @@ const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 // Send a Facebook Messenger message via the Graph API
 // ---------------------------------------------------------------------------
 
+export interface SendResult {
+  ok: boolean
+  error?: string
+  errorCode?: number | string
+}
+
 export async function sendFacebookMessage(
   recipientId: string,
   message: string
-): Promise<boolean> {
+): Promise<SendResult> {
   const accessToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
 
   if (!accessToken) {
     console.error("[Facebook] Missing FACEBOOK_PAGE_ACCESS_TOKEN")
-    return false
+    return { ok: false, error: "Credenciales de Facebook no configuradas" }
   }
 
   try {
@@ -29,16 +35,72 @@ export async function sendFacebookMessage(
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      console.error("[Facebook] Send message failed:", response.status, err)
-      return false
+      const raw = await response.text()
+      console.error("[Facebook] Send failed:", response.status, raw)
+      return { ok: false, ...parseMessengerError(raw, response.status) }
     }
 
     console.log("[Facebook] Message sent to:", recipientId)
-    return true
+    return { ok: true }
   } catch (error) {
     console.error("[Facebook] Send message exception:", error)
-    return false
+    return { ok: false, error: "Error de red contactando a Messenger" }
+  }
+}
+
+function parseMessengerError(
+  raw: string,
+  status: number
+): { error: string; errorCode?: number | string } {
+  try {
+    const json = JSON.parse(raw)
+    const code = json?.error?.code
+    const subcode = json?.error?.error_subcode
+    const message: string = json?.error?.message ?? ""
+
+    // Outside 24h messaging window
+    if (code === 10 && subcode === 2018278) {
+      return {
+        errorCode: code,
+        error:
+          "Pasaron mas de 24h desde el ultimo mensaje del cliente. Messenger no permite enviar fuera de esa ventana sin etiqueta.",
+      }
+    }
+    // Token issues
+    if (code === 190 || subcode === 463 || subcode === 467) {
+      return {
+        errorCode: code,
+        error: "Token de pagina de Facebook expirado. Renuevalo en Business Manager.",
+      }
+    }
+    // Recipient unavailable / blocked the page
+    if (code === 551 || subcode === 1545041) {
+      return {
+        errorCode: code,
+        error: "El usuario bloqueo la pagina o su cuenta no esta disponible.",
+      }
+    }
+    // PSID invalido (probablemente el facebook_id guardado esta mal — caso del bug de leadgen)
+    if (code === 100 && /recipient/i.test(message)) {
+      return {
+        errorCode: code,
+        error:
+          "El facebook_id del contacto no corresponde a un usuario de Messenger.",
+      }
+    }
+    // Missing permissions
+    if (code === 200) {
+      return {
+        errorCode: code,
+        error: "Faltan permisos del token de pagina (pages_messaging).",
+      }
+    }
+    if (message) {
+      return { errorCode: code, error: `Meta: ${message}` }
+    }
+    return { error: `HTTP ${status} desde Meta` }
+  } catch {
+    return { error: `HTTP ${status} desde Meta` }
   }
 }
 

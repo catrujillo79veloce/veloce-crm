@@ -198,7 +198,7 @@ async function processMessengerMessages(body: any) {
         // --- Send via Messenger ---
         const sent = await sendFacebookMessage(senderId, aiResponse)
 
-        if (sent) {
+        if (sent.ok) {
           await supabase.from("crm_interactions").insert({
             contact_id: contactId,
             type: "facebook_message",
@@ -209,7 +209,7 @@ async function processMessengerMessages(body: any) {
           })
           console.log("[Messenger] AI replied to:", contactId)
         } else {
-          console.error("[Messenger] Send failed:", senderId)
+          console.error("[Messenger] Send failed:", senderId, sent.error)
         }
       } catch (error) {
         console.error("[Messenger] Event error:", error)
@@ -237,12 +237,14 @@ async function processLeadgenEvents(body: any) {
         continue
       }
 
+      // NOTE: Lead Ads payload does NOT include the user's Messenger PSID,
+      // so we cannot set facebook_id here. Setting pageId would corrupt
+      // Messenger lookups (every lead would share the page's id).
       const contactInsert: Record<string, unknown> = {
         first_name: leadData.first_name || "Facebook",
         last_name: leadData.last_name || "Lead",
         source: "facebook_lead_ads",
         source_detail: `form:${event.formId}`,
-        facebook_id: event.pageId,
         city: leadData.city || "Medellin",
         status: "active",
         interests: [],

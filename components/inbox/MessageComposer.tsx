@@ -23,7 +23,7 @@ const CHANNEL_CONFIG: Record<
     label: "Facebook",
     icon: MessageSquare,
     color: "text-blue-600",
-    canSend: false, // Placeholder - outbound not implemented yet
+    canSend: true,
   },
   instagram_message: {
     label: "Instagram",
@@ -66,7 +66,9 @@ export default function MessageComposer({
         ? "/api/whatsapp/send"
         : channelType === "instagram_message"
           ? "/api/instagram/send"
-          : null
+          : channelType === "facebook_message"
+            ? "/api/facebook/send"
+            : null
 
     if (!apiEndpoint) return
 

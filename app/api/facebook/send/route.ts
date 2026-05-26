@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import { sendFacebookMessage } from "@/lib/integrations/facebook"
 
 // ---------------------------------------------------------------------------
-// POST - Send outbound WhatsApp message (authenticated CRM users only)
+// POST - Send outbound Facebook Messenger message (authenticated CRM users only)
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
@@ -49,10 +49,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Get contact's WhatsApp phone ---
+    // --- Get contact's Facebook ID ---
     const { data: contact, error: contactError } = await supabase
       .from("crm_contacts")
-      .select("id, whatsapp_phone, first_name, last_name")
+      .select("id, facebook_id, first_name, last_name")
       .eq("id", contactId)
       .single()
 
@@ -63,24 +63,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!contact.whatsapp_phone) {
+    if (!contact.facebook_id) {
       return NextResponse.json(
-        { success: false, error: "El contacto no tiene numero de WhatsApp" },
+        { success: false, error: "El contacto no tiene Facebook ID" },
         { status: 400 }
       )
     }
 
     // --- Send message ---
-    const result = await sendWhatsAppMessage(
-      contact.whatsapp_phone.replace("+", ""),
-      message.trim()
-    )
+    const result = await sendFacebookMessage(contact.facebook_id, message.trim())
 
     if (!result.ok) {
       return NextResponse.json(
         {
           success: false,
-          error: result.error ?? "Error al enviar el mensaje por WhatsApp",
+          error: result.error ?? "Error al enviar el mensaje por Messenger",
           errorCode: result.errorCode,
         },
         { status: 502 }
@@ -92,20 +89,20 @@ export async function POST(request: NextRequest) {
       .from("crm_interactions")
       .insert({
         contact_id: contactId,
-        type: "whatsapp_message",
+        type: "facebook_message",
         direction: "outbound",
         subject: null,
         body: message.trim(),
         team_member_id: teamMember.id,
         channel_metadata: {
-          phone: contact.whatsapp_phone,
+          facebook_id: contact.facebook_id,
           sent_by: teamMember.id,
         },
         occurred_at: new Date().toISOString(),
       })
 
     if (interactionError) {
-      console.error("[WhatsApp Send] Interaction creation failed:", interactionError)
+      console.error("[Facebook Send] Interaction creation failed:", interactionError)
       // Message was sent, so still return success
     }
 
@@ -114,7 +111,7 @@ export async function POST(request: NextRequest) {
       message: "Mensaje enviado correctamente",
     })
   } catch (error) {
-    console.error("[WhatsApp Send] Unexpected error:", error)
+    console.error("[Facebook Send] Unexpected error:", error)
     return NextResponse.json(
       { success: false, error: "Error interno del servidor" },
       { status: 500 }

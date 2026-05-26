@@ -5,15 +5,21 @@ const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 // Send an Instagram Direct message via the Graph API
 // ---------------------------------------------------------------------------
 
+export interface SendResult {
+  ok: boolean
+  error?: string
+  errorCode?: number | string
+}
+
 export async function sendInstagramMessage(
   recipientId: string,
   message: string
-): Promise<boolean> {
+): Promise<SendResult> {
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN
 
   if (!accessToken) {
     console.error("[Instagram] Missing INSTAGRAM_ACCESS_TOKEN")
-    return false
+    return { ok: false, error: "Credenciales de Instagram no configuradas" }
   }
 
   try {
@@ -31,16 +37,65 @@ export async function sendInstagramMessage(
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      console.error("[Instagram] Send message failed:", response.status, err)
-      return false
+      const raw = await response.text()
+      console.error("[Instagram] Send failed:", response.status, raw)
+      return { ok: false, ...parseInstagramError(raw, response.status) }
     }
 
     console.log("[Instagram] Message sent to:", recipientId)
-    return true
+    return { ok: true }
   } catch (error) {
     console.error("[Instagram] Send message exception:", error)
-    return false
+    return { ok: false, error: "Error de red contactando a Instagram" }
+  }
+}
+
+function parseInstagramError(
+  raw: string,
+  status: number
+): { error: string; errorCode?: number | string } {
+  try {
+    const json = JSON.parse(raw)
+    const code = json?.error?.code
+    const subcode = json?.error?.error_subcode
+    const message: string = json?.error?.message ?? ""
+
+    // Outside 24h messaging window (Instagram policy)
+    if (code === 10 && /policy/i.test(message)) {
+      return {
+        errorCode: code,
+        error:
+          "Pasaron mas de 24h desde el ultimo DM del cliente. Instagram no permite enviar fuera de esa ventana.",
+      }
+    }
+    // Token issues
+    if (code === 190 || subcode === 463 || subcode === 467) {
+      return {
+        errorCode: code,
+        error: "Token de Instagram expirado. Renuevalo en Meta Business.",
+      }
+    }
+    // User not found / can't message
+    if (code === 100 || code === 551) {
+      return {
+        errorCode: code,
+        error: "No se puede enviar a este usuario (cuenta inaccesible o invalida).",
+      }
+    }
+    // Missing permissions
+    if (code === 200) {
+      return {
+        errorCode: code,
+        error:
+          "Faltan permisos del token (instagram_business_manage_messages).",
+      }
+    }
+    if (message) {
+      return { errorCode: code, error: `Meta: ${message}` }
+    }
+    return { error: `HTTP ${status} desde Meta` }
+  } catch {
+    return { error: `HTTP ${status} desde Meta` }
   }
 }
 

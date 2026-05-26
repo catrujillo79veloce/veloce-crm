@@ -133,7 +133,11 @@ ${channelEmoji} Canal: *${channel.toUpperCase()}*
 Ver en CRM: ${crmBaseUrl}/contacts/${contactId}`
 
   try {
-    return await sendWhatsAppMessage(adminPhone, alert)
+    const result = await sendWhatsAppMessage(adminPhone, alert)
+    if (!result.ok) {
+      console.error("[HotAlert] Send failed:", result.error)
+    }
+    return result.ok
   } catch (err) {
     console.error("[HotAlert] Send failed:", err)
     return false

@@ -1,6 +1,16 @@
 import { createHmac, timingSafeEqual } from "crypto"
 
 /**
+ * Compute the expected HMAC for a payload — useful for debugging
+ * webhook signature mismatches without exposing the secret in logs.
+ */
+export function computeExpectedSignature(payload: string, appSecret: string): string {
+  const hmac = createHmac("sha256", appSecret)
+  hmac.update(payload, "utf8")
+  return `sha256=${hmac.digest("hex")}`
+}
+
+/**
  * Verify Meta webhook signature (x-hub-signature-256 header).
  *
  * Meta signs every webhook POST payload with HMAC-SHA256 using the

@@ -182,7 +182,7 @@ async function processAndReply(body: any) {
       // --- Send reply via WhatsApp API ---
       const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)
 
-      if (sent) {
+      if (sent.ok) {
         // Save outbound message in CRM
         await supabase.from("crm_interactions").insert({
           contact_id: contactId,
@@ -194,7 +194,7 @@ async function processAndReply(body: any) {
         })
         console.log("[WhatsApp] AI replied to:", contactId)
       } else {
-        console.error("[WhatsApp] Failed to send reply to:", normalizedPhone)
+        console.error("[WhatsApp] Failed to send reply to:", normalizedPhone, sent.error)
       }
     } catch (error) {
       console.error("[WhatsApp] Error:", error)
