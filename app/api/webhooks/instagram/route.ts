@@ -15,7 +15,7 @@ const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 
 // ---------------------------------------------------------------------------
 // GET - Webhook verification
-// ---------------------------------------------------------------------------h
+// ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -168,7 +168,7 @@ async function processInstagramMessages(body: any) {
 
       // --- HOT ALERT ---
       const detection = detectHotMessage(msg.message)
-      if (detection.isHot) {h
+      if (detection.isHot) {
         sendHotAlert({
           adminPhone: ADMIN_PHONE,
           contactName: `Instagram User ${msg.senderId.slice(-6)}`,
