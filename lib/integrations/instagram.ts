@@ -1,5 +1,8 @@
-const GRAPH_API_VERSION = "v19.0"
-const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
+// Instagram Business Login API (IGAA tokens) requires graph.instagram.com.
+// Facebook-page-based access (EAA tokens) used graph.facebook.com — kept here
+// only to document why this differs from facebook.ts / whatsapp.ts.
+const GRAPH_API_VERSION = "v22.0"
+const GRAPH_API_BASE = `https://graph.instagram.com/${GRAPH_API_VERSION}`
 
 // ---------------------------------------------------------------------------
 // Send an Instagram Direct message via the Graph API
