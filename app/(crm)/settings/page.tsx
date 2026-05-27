@@ -1,7 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { Users, Radio, Tag, UserCircle, ChevronRight } from "lucide-react"
+import {
+  Users,
+  Radio,
+  Tag,
+  UserCircle,
+  ChevronRight,
+  Sparkles,
+} from "lucide-react"
 import { Card, CardContent } from "@/components/ui"
 import { useI18n } from "@/lib/i18n/config"
 import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
@@ -26,6 +33,16 @@ const settingsSections = [
     descEs: "Configura WhatsApp, Facebook, Instagram y otros canales",
     descEn: "Configure WhatsApp, Facebook, Instagram and other channels",
     color: "#22c55e",
+  },
+  {
+    key: "canned-responses",
+    href: "/settings/canned-responses",
+    icon: Sparkles,
+    titleEs: "Respuestas guardadas",
+    titleEn: "Canned responses",
+    descEs: "Plantillas de mensajes para insertar en el inbox con un clic",
+    descEn: "Message templates to insert in the inbox with one click",
+    color: "#ec4899",
   },
   {
     key: "tags",

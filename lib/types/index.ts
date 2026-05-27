@@ -204,6 +204,18 @@ export interface Interaction {
   created_at: string
 }
 
+export interface CannedResponse {
+  id: string
+  name: string
+  body: string
+  category: string
+  shortcut: string | null
+  use_count: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Task {
   id: string
   title: string
