@@ -13,6 +13,8 @@ import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
 import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { classifyIntent } from "@/lib/ai/classify-intent"
+import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
 // Allow up to 60s for AI response generation + Instagram send
 export const maxDuration = 60
@@ -241,6 +243,18 @@ async function processInstagramMessages(body: any) {
         message: msg.message,
         skip: hotPingFired,
       }).catch((e) => console.error("[Instagram] Notify admin failed:", e))
+
+      // --- AUTO-TAG by intent (fire-and-forget) ---
+      const intentInput = transcription
+        ? `${msg.message} ${transcription}`.trim()
+        : msg.message
+      if (intentInput && intentInput.length > 2) {
+        classifyIntent(intentInput)
+          .then((res) => {
+            if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
+          })
+          .catch((e) => console.error("[Instagram] Intent tag failed:", e))
+      }
 
       // --- AI REPLY GATE: respect per-contact pause + global pause ---
       const gate = await shouldAIReply(supabase, contactId)

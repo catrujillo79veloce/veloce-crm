@@ -12,6 +12,8 @@ import { shouldAIReply } from "@/lib/ai/should-reply"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
 import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { classifyIntent } from "@/lib/ai/classify-intent"
+import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
 // Allow up to 60s for AI response generation + Facebook send
 export const maxDuration = 60
@@ -241,6 +243,24 @@ async function processMessengerMessages(body: any) {
           message: text,
           skip: hotPingFired,
         }).catch((e) => console.error("[Messenger] Notify admin failed:", e))
+
+        // --- AUTO-TAG by intent (fire-and-forget) ---
+        const intentInput = transcription
+          ? `${text} ${transcription}`.trim()
+          : text
+        if (intentInput && intentInput.length > 2) {
+          classifyIntent(intentInput)
+            .then((res) => {
+              if (res)
+                return applyIntentTag(
+                  supabase,
+                  contactId,
+                  res.intent,
+                  res.confidence
+                )
+            })
+            .catch((e) => console.error("[Messenger] Intent tag failed:", e))
+        }
 
         // --- AI REPLY GATE: respect per-contact pause + global pause ---
         const gate = await shouldAIReply(supabase, contactId)

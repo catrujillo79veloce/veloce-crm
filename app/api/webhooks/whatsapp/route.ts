@@ -14,6 +14,8 @@ import {
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
 import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { classifyIntent } from "@/lib/ai/classify-intent"
+import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
 // Allow up to 60s for AI response generation + WhatsApp send
 export const maxDuration = 60
@@ -235,6 +237,18 @@ async function processAndReply(body: any) {
           message: msg.message,
           skip: hotPingFired, // hot alert already covers this message
         }).catch((e) => console.error("[WhatsApp] Notify admin failed:", e))
+      }
+
+      // --- AUTO-TAG by intent (fire-and-forget, doesn't block the bot) ---
+      const intentInput = transcription
+        ? `${msg.message} ${transcription}`.trim()
+        : msg.message
+      if (intentInput && intentInput.length > 2) {
+        classifyIntent(intentInput)
+          .then((res) => {
+            if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
+          })
+          .catch((e) => console.error("[WhatsApp] Intent tag failed:", e))
       }
 
       // --- AI REPLY GATE: respect per-contact pause + global pause ---
