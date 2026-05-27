@@ -158,10 +158,16 @@ export interface Product {
   category: ProductCategory
   sku: string | null
   price: number
+  sale_price: number | null
   cost: number | null
   currency: string
   description: string | null
   image_url: string | null
+  gallery_urls: string[]
+  sizes: string[]
+  external_url: string | null
+  slug: string | null
+  specs: Record<string, string | number>
   in_stock: boolean
   stock_quantity: number
   is_active: boolean

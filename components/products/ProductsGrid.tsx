@@ -9,7 +9,7 @@ import {
   PowerOff,
   Plus,
   Search,
-
+  Upload,
 } from "lucide-react"
 import {
   Button,
@@ -26,6 +26,7 @@ import { formatCurrency, cn } from "@/lib/utils"
 import { PRODUCT_CATEGORIES } from "@/lib/constants"
 import { toggleProductActive } from "@/app/actions/products"
 import { ProductForm } from "./ProductForm"
+import { ProductsImportDialog } from "./ProductsImportDialog"
 import type { Product } from "@/lib/types"
 
 interface ProductsGridProps {
@@ -40,6 +41,7 @@ export function ProductsGrid({ products, total }: ProductsGridProps) {
   const { toast } = useToast()
   const [isPending, startTransition] = useTransition()
   const [showForm, setShowForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [search, setSearch] = useState(searchParams.get("search") || "")
 
@@ -115,10 +117,16 @@ export function ProductsGrid({ products, total }: ProductsGridProps) {
               {total} {locale === "es" ? "productos" : "products"}
             </p>
           </div>
-          <Button onClick={() => setShowForm(true)}>
-            <Plus className="h-4 w-4" />
-            {t.products.newProduct}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowImport(true)}>
+              <Upload className="h-4 w-4" />
+              Importar CSV
+            </Button>
+            <Button onClick={() => setShowForm(true)}>
+              <Plus className="h-4 w-4" />
+              {t.products.newProduct}
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -290,6 +298,15 @@ export function ProductsGrid({ products, total }: ProductsGridProps) {
         }}
         onSuccess={handleFormSuccess}
         product={editProduct}
+      />
+
+      <ProductsImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onSuccess={() => {
+          // Refresh the page to show the imported rows
+          router.refresh()
+        }}
       />
     </>
   )
