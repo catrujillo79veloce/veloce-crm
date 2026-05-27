@@ -31,10 +31,13 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname
 
-  // Skip auth for API routes, webhooks, and public lead form
+  // Skip auth for API routes, webhooks, public lead form, and the public
+  // Veloce landing page used by Google Ads and Meta Ads.
   if (
     path.startsWith("/api/") ||
-    path === "/lead-form"
+    path === "/lead-form" ||
+    path === "/veloce" ||
+    path.startsWith("/veloce/")
   ) {
     return supabaseResponse
   }
