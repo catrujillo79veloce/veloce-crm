@@ -12,8 +12,18 @@ import { ContactDeals } from "./ContactDeals"
 import { ContactLeads } from "./ContactLeads"
 import { ContactNotes } from "./ContactNotes"
 import { ContactQuickActions } from "./ContactQuickActions"
+import { ContactSummaryCard } from "./ContactSummaryCard"
+import { ContactBikes } from "./ContactBikes"
 import { useI18n } from "@/lib/i18n/config"
-import type { Contact, Interaction, Deal, Lead, Note, Tag } from "@/lib/types"
+import type {
+  Contact,
+  Interaction,
+  Deal,
+  Lead,
+  Note,
+  Tag,
+  CustomerBike,
+} from "@/lib/types"
 
 interface TeamMemberOption {
   id: string
@@ -29,6 +39,7 @@ interface ContactDetailViewProps {
   deals: Deal[]
   leads: Lead[]
   notes: Note[]
+  bikes: CustomerBike[]
   teamMembers: TeamMemberOption[]
   allTags: Tag[]
 }
@@ -40,6 +51,7 @@ export function ContactDetailView({
   deals,
   leads,
   notes,
+  bikes,
   teamMembers,
   allTags,
 }: ContactDetailViewProps) {
@@ -47,8 +59,14 @@ export function ContactDetailView({
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      {/* Left column - info panel + quick actions */}
+      {/* Left column - summary + info panel + quick actions */}
       <div className="lg:col-span-1 space-y-4">
+        <ContactSummaryCard
+          deals={deals}
+          interactions={interactions}
+          interactionCount={interactionCount}
+          bikesCount={bikes.length}
+        />
         <ContactInfoPanel contact={contact} />
         <ContactQuickActions
           contact={contact}
@@ -71,6 +89,9 @@ export function ContactDetailView({
               <Tab value="leads">
                 Leads ({leads.length})
               </Tab>
+              <Tab value="bikes">
+                Bicis ({bikes.length})
+              </Tab>
               <Tab value="notes">
                 {t.contacts.notes} ({notes.length})
               </Tab>
@@ -89,6 +110,12 @@ export function ContactDetailView({
               </TabPanel>
               <TabPanel value="leads">
                 <ContactLeads leads={leads} />
+              </TabPanel>
+              <TabPanel value="bikes">
+                <ContactBikes
+                  contactId={contact.id}
+                  initialBikes={bikes}
+                />
               </TabPanel>
               <TabPanel value="notes">
                 <ContactNotes

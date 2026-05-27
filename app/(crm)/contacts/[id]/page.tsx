@@ -14,9 +14,11 @@ import {
 } from "@/app/actions/contacts"
 import { getTeamMembers } from "@/app/actions/leads"
 import { getTags } from "@/app/actions/tags"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { ContactDetailView } from "@/components/contacts/ContactDetailView"
 import MergeContactButton from "@/components/contacts/MergeContactButton"
 import { Button } from "@/components/ui"
+import type { CustomerBike } from "@/lib/types"
 
 interface ContactDetailPageProps {
   params: { id: string }
@@ -33,6 +35,8 @@ export async function generateMetadata({ params }: ContactDetailPageProps) {
 export default async function ContactDetailPage({
   params,
 }: ContactDetailPageProps) {
+  const supabase = createServerSupabaseClient()
+
   const [
     contact,
     interactionsResult,
@@ -41,6 +45,7 @@ export default async function ContactDetailPage({
     notes,
     teamMembers,
     allTags,
+    bikesResp,
   ] = await Promise.all([
     getContact(params.id),
     getContactInteractions(params.id, 1, 20),
@@ -49,9 +54,16 @@ export default async function ContactDetailPage({
     getContactNotes(params.id),
     getTeamMembers(),
     getTags(),
+    supabase
+      .from("crm_customer_bikes")
+      .select("*")
+      .eq("contact_id", params.id)
+      .order("created_at", { ascending: false }),
   ])
 
   if (!contact) notFound()
+
+  const bikes: CustomerBike[] = (bikesResp.data ?? []) as CustomerBike[]
 
   const waLink = contact.whatsapp_phone
     ? `https://wa.me/${contact.whatsapp_phone.replace(/[^0-9]/g, "")}`
@@ -112,6 +124,7 @@ export default async function ContactDetailPage({
         deals={deals}
         leads={leads}
         notes={notes}
+        bikes={bikes}
         teamMembers={teamMembers}
         allTags={allTags}
       />

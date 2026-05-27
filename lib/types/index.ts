@@ -204,6 +204,24 @@ export interface Interaction {
   created_at: string
 }
 
+export interface CustomerBike {
+  id: string
+  contact_id: string
+  brand: string
+  model: string | null
+  year: number | null
+  color: string | null
+  frame_size: string | null
+  serial_number: string | null
+  purchase_date: string | null
+  source: "veloce" | "external" | "unknown"
+  notes: string | null
+  image_url: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface CannedResponse {
   id: string
   name: string
