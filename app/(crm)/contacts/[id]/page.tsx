@@ -15,6 +15,7 @@ import {
 import { getTeamMembers } from "@/app/actions/leads"
 import { getTags } from "@/app/actions/tags"
 import { ContactDetailView } from "@/components/contacts/ContactDetailView"
+import MergeContactButton from "@/components/contacts/MergeContactButton"
 import { Button } from "@/components/ui"
 
 interface ContactDetailPageProps {
@@ -94,6 +95,7 @@ export default async function ContactDetailPage({
               </Button>
             </a>
           )}
+          <MergeContactButton contact={contact} />
           <Link href={`/contacts/${contact.id}/edit`}>
             <Button variant="secondary" size="sm">
               Editar
