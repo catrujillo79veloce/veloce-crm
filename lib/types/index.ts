@@ -99,6 +99,8 @@ export interface Contact {
   cycling_app_profile_id: string | null
   status: ContactStatus
   avatar_url: string | null
+  ai_enabled?: boolean
+  ai_paused_at?: string | null
   created_at: string
   updated_at: string
   tags?: Tag[]

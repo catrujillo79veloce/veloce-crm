@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Users, Radio, Tag, UserCircle, ChevronRight } from "lucide-react"
 import { Card, CardContent } from "@/components/ui"
 import { useI18n } from "@/lib/i18n/config"
+import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
 
 const settingsSections = [
   {
@@ -61,6 +62,8 @@ export default function SettingsPage() {
             : "Manage your CRM configuration"}
         </p>
       </div>
+
+      <AIGlobalPauseToggle />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {settingsSections.map((section) => {

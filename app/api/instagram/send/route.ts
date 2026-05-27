@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { sendInstagramMessage } from "@/lib/integrations/instagram"
+import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
 // POST - Send outbound Instagram DM (authenticated CRM users only)
@@ -104,6 +106,13 @@ export async function POST(request: NextRequest) {
     if (interactionError) {
       console.error("[Instagram Send] Interaction creation failed:", interactionError)
       // Message was sent, so still return success
+    }
+
+    // --- AI takeover ---
+    try {
+      await pauseAIForContact(createAdminClient(), contactId)
+    } catch (e) {
+      console.error("[Instagram Send] AI pause failed:", e)
     }
 
     return NextResponse.json({

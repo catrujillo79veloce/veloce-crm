@@ -5,6 +5,8 @@ import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/wh
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
+import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { shouldAIReply } from "@/lib/ai/should-reply"
 
 // Allow up to 60s for AI response generation + WhatsApp send
 export const maxDuration = 60
@@ -148,8 +150,11 @@ async function processAndReply(body: any) {
 
       // --- HOT ALERT: notify admin if message shows buying intent ---
       const detection = detectHotMessage(msg.message)
-      if (detection.isHot && ADMIN_PHONE !== normalizedPhone.replace(/\+/g, "")) {
-        const contactName = msg.senderName ?? normalizedPhone
+      const contactName = msg.senderName ?? normalizedPhone
+      const isAdminSelf = ADMIN_PHONE === normalizedPhone.replace(/\+/g, "")
+      let hotPingFired = false
+      if (detection.isHot && !isAdminSelf) {
+        hotPingFired = true
         sendHotAlert({
           adminPhone: ADMIN_PHONE,
           contactName,
@@ -158,6 +163,27 @@ async function processAndReply(body: any) {
           message: msg.message,
           detection,
         }).catch((e) => console.error("[WhatsApp] Hot alert failed:", e))
+      }
+
+      // --- GENERIC NOTIFY: debounced ping for every new inbound ---
+      if (!isAdminSelf) {
+        notifyAdminOfNewMessage({
+          supabase,
+          contactId,
+          contactName,
+          channel: "whatsapp",
+          message: msg.message,
+          skip: hotPingFired, // hot alert already covers this message
+        }).catch((e) => console.error("[WhatsApp] Notify admin failed:", e))
+      }
+
+      // --- AI REPLY GATE: respect per-contact pause + global pause ---
+      const gate = await shouldAIReply(supabase, contactId)
+      if (!gate.ok) {
+        console.log(
+          `[WhatsApp] AI skipped for ${contactId} — reason=${gate.reason}`
+        )
+        continue
       }
 
       // --- Get conversation history for context ---

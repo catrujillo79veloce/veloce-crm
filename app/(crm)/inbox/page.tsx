@@ -20,7 +20,8 @@ async function getConversations(): Promise<ConversationSummary[]> {
       *,
       contact:crm_contacts!crm_interactions_contact_id_fkey(
         id, first_name, last_name, email, phone, whatsapp_phone,
-        facebook_id, instagram_id, source, avatar_url, status
+        facebook_id, instagram_id, source, avatar_url, status,
+        ai_enabled, ai_paused_at
       )
     `
     )

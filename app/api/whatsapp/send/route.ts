@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
 // POST - Send outbound WhatsApp message (authenticated CRM users only)
@@ -107,6 +109,15 @@ export async function POST(request: NextRequest) {
     if (interactionError) {
       console.error("[WhatsApp Send] Interaction creation failed:", interactionError)
       // Message was sent, so still return success
+    }
+
+    // --- AI takeover: a human just sent a message, so pause the bot ---
+    // We need the admin client because RLS may not allow the team member
+    // to update arbitrary contact rows directly.
+    try {
+      await pauseAIForContact(createAdminClient(), contactId)
+    } catch (e) {
+      console.error("[WhatsApp Send] AI pause failed:", e)
     }
 
     return NextResponse.json({

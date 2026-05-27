@@ -1,7 +1,15 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { MessageCircle, MessageSquare, Camera, User, ExternalLink } from "lucide-react"
+import {
+  MessageCircle,
+  MessageSquare,
+  Camera,
+  User,
+  ExternalLink,
+  Bot,
+  BotOff,
+} from "lucide-react"
 import { cn, formatDateTime } from "@/lib/utils"
 import { Avatar, LoadingSpinner } from "@/components/ui"
 import { createClient } from "@/lib/supabase/client"
@@ -52,7 +60,41 @@ export default function ConversationThread({
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<Interaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [aiEnabled, setAiEnabled] = useState<boolean>(contact.ai_enabled ?? true)
+  const [togglingAi, setTogglingAi] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Sync AI state when the selected contact changes
+  useEffect(() => {
+    setAiEnabled(contact.ai_enabled ?? true)
+  }, [contact.id, contact.ai_enabled])
+
+  // Toggle AI auto-reply for this contact
+  const toggleAi = async () => {
+    if (togglingAi) return
+    const next = !aiEnabled
+    setTogglingAi(true)
+    // Optimistic update
+    setAiEnabled(next)
+    try {
+      const response = await fetch(`/api/contacts/${contact.id}/toggle-ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      })
+      const result = await response.json()
+      if (!result.success) {
+        // Revert on failure
+        setAiEnabled(!next)
+        console.error("Toggle AI failed:", result.error)
+      }
+    } catch (e) {
+      setAiEnabled(!next)
+      console.error("Toggle AI error:", e)
+    } finally {
+      setTogglingAi(false)
+    }
+  }
 
   // Load messages for this contact
   useEffect(() => {
@@ -133,6 +175,34 @@ export default function ConversationThread({
             {contact.whatsapp_phone || contact.phone || contact.email || ""}
           </p>
         </div>
+        {/* AI auto-reply toggle */}
+        <button
+          onClick={toggleAi}
+          disabled={togglingAi}
+          title={
+            aiEnabled
+              ? "Pausar respuesta automatica de la IA para este contacto"
+              : "Reanudar respuesta automatica de la IA"
+          }
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors border",
+            aiEnabled
+              ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+              : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100",
+            togglingAi && "opacity-60 cursor-wait"
+          )}
+        >
+          {aiEnabled ? (
+            <>
+              <Bot className="w-3.5 h-3.5" /> IA: ON
+            </>
+          ) : (
+            <>
+              <BotOff className="w-3.5 h-3.5" /> IA pausada
+            </>
+          )}
+        </button>
+
         <a
           href={`/contacts/${contact.id}`}
           className="flex items-center gap-1 text-xs text-veloce-600 hover:text-veloce-700 transition-colors"

@@ -7,6 +7,8 @@ import {
 import { parseInstagramWebhook, sendInstagramMessage } from "@/lib/integrations/instagram"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
+import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { shouldAIReply } from "@/lib/ai/should-reply"
 
 // Allow up to 60s for AI response generation + Instagram send
 export const maxDuration = 60
@@ -168,15 +170,37 @@ async function processInstagramMessages(body: any) {
 
       // --- HOT ALERT ---
       const detection = detectHotMessage(msg.message)
+      const contactName = `Instagram User ${msg.senderId.slice(-6)}`
+      let hotPingFired = false
       if (detection.isHot) {
+        hotPingFired = true
         sendHotAlert({
           adminPhone: ADMIN_PHONE,
-          contactName: `Instagram User ${msg.senderId.slice(-6)}`,
+          contactName,
           contactId,
           channel: "instagram",
           message: msg.message,
           detection,
         }).catch((e) => console.error("[Instagram] Hot alert failed:", e))
+      }
+
+      // --- GENERIC NOTIFY: debounced ping for every new inbound ---
+      notifyAdminOfNewMessage({
+        supabase,
+        contactId,
+        contactName,
+        channel: "instagram",
+        message: msg.message,
+        skip: hotPingFired,
+      }).catch((e) => console.error("[Instagram] Notify admin failed:", e))
+
+      // --- AI REPLY GATE: respect per-contact pause + global pause ---
+      const gate = await shouldAIReply(supabase, contactId)
+      if (!gate.ok) {
+        console.log(
+          `[Instagram] AI skipped for ${contactId} — reason=${gate.reason}`
+        )
+        continue
       }
 
       // --- Get conversation history for context ---

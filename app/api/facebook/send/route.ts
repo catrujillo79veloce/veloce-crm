@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { sendFacebookMessage } from "@/lib/integrations/facebook"
+import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
 // POST - Send outbound Facebook Messenger message (authenticated CRM users only)
@@ -104,6 +106,13 @@ export async function POST(request: NextRequest) {
     if (interactionError) {
       console.error("[Facebook Send] Interaction creation failed:", interactionError)
       // Message was sent, so still return success
+    }
+
+    // --- AI takeover ---
+    try {
+      await pauseAIForContact(createAdminClient(), contactId)
+    } catch (e) {
+      console.error("[Facebook Send] AI pause failed:", e)
     }
 
     return NextResponse.json({

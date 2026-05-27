@@ -5,6 +5,8 @@ import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/i
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
+import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { shouldAIReply } from "@/lib/ai/should-reply"
 
 // Allow up to 60s for AI response generation + Facebook send
 export const maxDuration = 60
@@ -165,15 +167,37 @@ async function processMessengerMessages(body: any) {
 
         // --- HOT ALERT ---
         const detection = detectHotMessage(text)
+        const contactName = `Facebook User ${senderId.slice(-6)}`
+        let hotPingFired = false
         if (detection.isHot) {
+          hotPingFired = true
           sendHotAlert({
             adminPhone: ADMIN_PHONE,
-            contactName: `Facebook User ${senderId.slice(-6)}`,
+            contactName,
             contactId,
             channel: "facebook",
             message: text,
             detection,
           }).catch((e) => console.error("[Messenger] Hot alert failed:", e))
+        }
+
+        // --- GENERIC NOTIFY: debounced ping for every new inbound ---
+        notifyAdminOfNewMessage({
+          supabase,
+          contactId,
+          contactName,
+          channel: "facebook",
+          message: text,
+          skip: hotPingFired,
+        }).catch((e) => console.error("[Messenger] Notify admin failed:", e))
+
+        // --- AI REPLY GATE: respect per-contact pause + global pause ---
+        const gate = await shouldAIReply(supabase, contactId)
+        if (!gate.ok) {
+          console.log(
+            `[Messenger] AI skipped for ${contactId} — reason=${gate.reason}`
+          )
+          continue
         }
 
         // --- Conversation history ---

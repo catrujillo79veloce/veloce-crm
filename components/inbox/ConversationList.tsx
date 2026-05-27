@@ -1,6 +1,6 @@
 "use client"
 
-import { MessageCircle, MessageSquare, Camera } from "lucide-react"
+import { MessageCircle, MessageSquare, Camera, BotOff } from "lucide-react"
 import { cn, truncate, formatRelativeTime } from "@/lib/utils"
 import { Avatar } from "@/components/ui"
 import type { ConversationSummary } from "@/app/(crm)/inbox/page"
@@ -95,6 +95,14 @@ export default function ConversationList({
                   {lastInteraction.direction === "outbound" && "Tu: "}
                   {truncate(lastInteraction.body ?? "", 50)}
                 </span>
+                {contact.ai_enabled === false && (
+                  <span
+                    title="IA pausada para este contacto"
+                    className="ml-auto flex items-center gap-0.5 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 flex-shrink-0"
+                  >
+                    <BotOff className="w-3 h-3" />
+                  </span>
+                )}
               </div>
             </div>
 
