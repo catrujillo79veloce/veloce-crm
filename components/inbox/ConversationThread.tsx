@@ -144,6 +144,58 @@ export default function ConversationThread({
     }
   }, [contact.id])
 
+  // Realtime: append new messages to the OPEN conversation as they arrive.
+  // The filter scopes the subscription to this contact's rows on the server,
+  // so we don't get spammed with events from other conversations.
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`thread-${contact.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "crm_interactions",
+          filter: `contact_id=eq.${contact.id}`,
+        },
+        (payload) => {
+          const row = payload.new as Interaction
+          if (
+            row.type !== "whatsapp_message" &&
+            row.type !== "facebook_message" &&
+            row.type !== "instagram_message"
+          ) {
+            return
+          }
+          setMessages((prev) => {
+            // Drop optimistic temp- duplicates (same body + direction within 30s)
+            const cleaned = prev.filter(
+              (m) =>
+                !(
+                  m.id.startsWith("temp-") &&
+                  m.direction === row.direction &&
+                  m.body === row.body &&
+                  Math.abs(
+                    new Date(m.occurred_at).getTime() -
+                      new Date(row.occurred_at).getTime()
+                  ) < 30000
+                )
+            )
+            // Skip if the real row is already present (happens when the same
+            // tab inserted it and then receives the realtime echo)
+            if (cleaned.some((m) => m.id === row.id)) return cleaned
+            return [...cleaned, row]
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [contact.id])
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
