@@ -184,14 +184,29 @@ export function ProductsImportDialog({
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Headers expected */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-            <p className="font-medium mb-1">Columnas esperadas (la primera fila):</p>
-            <p className="font-mono leading-relaxed">
-              {EXPECTED_HEADERS.join(", ")}
-            </p>
-            <p className="mt-2">
-              <strong>name</strong> es obligatorio. <em>sizes</em> separadas por
-              coma: <span className="font-mono">S,M,L</span>.
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium mb-1">
+                  Columnas esperadas (la primera fila):
+                </p>
+                <p className="font-mono leading-relaxed">
+                  {EXPECTED_HEADERS.join(", ")}
+                </p>
+                <p className="mt-2">
+                  <strong>name</strong> es obligatorio. <em>sizes</em>{" "}
+                  separadas por coma:{" "}
+                  <span className="font-mono">S,M,L</span>.
+                </p>
+              </div>
+              <a
+                href="/sample/productos-veloce-ejemplo.csv"
+                download="productos-veloce-ejemplo.csv"
+                className="flex-shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900 underline whitespace-nowrap"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Descargar plantilla
+              </a>
+            </div>
           </div>
 
           {/* Drop zone */}

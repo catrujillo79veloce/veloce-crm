@@ -1,0 +1,26 @@
+name,brand,category,sku,price,sale_price,currency,description,image_url,external_url,sizes,in_stock,stock_quantity
+Orbea Terra H30,Orbea,bicycle,ORB-TERRA-H30,7500000,,COP,Bicicleta gravel con marco aluminio y horquilla carbono. Grupo Shimano GRX 11v. Ideal para terreno mixto y aventura.,,https://www.orbea.com/co-es/bicicletas/gravel/terra/,"S,M,L,XL",true,2
+Orbea Terra H50,Orbea,bicycle,ORB-TERRA-H50,9500000,,COP,Bicicleta gravel premium con grupo Shimano GRX 11v y ruedas tubeless ready. Excelente para ciclismo de aventura.,,https://www.orbea.com/co-es/bicicletas/gravel/terra/,"S,M,L,XL",true,1
+Orbea Avant H30,Orbea,bicycle,ORB-AVANT-H30,8200000,,COP,Bicicleta de ruta endurance con geometria comoda. Grupo Shimano 105 11v. Ideal para fondo y ciclo de gran fondo.,,https://www.orbea.com/co-es/bicicletas/carretera/avant/,"49,51,53,55,57",true,1
+Orbea Orca M30,Orbea,bicycle,ORB-ORCA-M30,15500000,,COP,Bicicleta de ruta de competencia. Marco carbono OMR y grupo Shimano 105 12v Di2. Para ciclista exigente.,,https://www.orbea.com/co-es/bicicletas/carretera/orca/,"49,51,53,55,57",true,1
+Orbea Alma H50,Orbea,bicycle,ORB-ALMA-H50,7900000,,COP,Bicicleta MTB rigida XC con marco aluminio. Grupo Shimano Deore 12v. Para cross-country y trail moderado.,,https://www.orbea.com/co-es/bicicletas/mountain-bike-xc/alma/,"S,M,L,XL",true,2
+Orbea Oiz H30,Orbea,bicycle,ORB-OIZ-H30,13800000,,COP,Bicicleta MTB doble suspension XC. Marco carbono y aluminio combinados. Para competencia y trail tecnico.,,https://www.orbea.com/co-es/bicicletas/mountain-bike-xc/oiz/,"S,M,L,XL",true,1
+Orbea Wild M-LTD,Orbea,bicycle,ORB-WILD-MLTD,32000000,,COP,E-MTB enduro de gama alta. Motor Bosch Performance Line CX y bateria 750Wh. Para terreno tecnico exigente.,,https://www.orbea.com/co-es/bicicletas/e-bike-mtb/wild/,"S,M,L,XL",true,1
+BMC Roadmachine 01 ONE,BMC,bicycle,BMC-RM01-ONE,28500000,,COP,Bicicleta de ruta endurance premium. Marco carbono Premium Carbon y grupo SRAM Force AXS. Comfort + rendimiento.,,https://www.bmc-switzerland.com/road/,"51,54,56,58,61",true,1
+BMC Teammachine SLR 01,BMC,bicycle,BMC-TM-SLR01,30500000,,COP,Bicicleta de ruta de competencia. Marco carbono ultraligero y grupo Shimano Ultegra Di2. Para racing y subir alto.,,https://www.bmc-switzerland.com/road/teammachine/,"51,54,56,58",true,1
+Chapter 2 KOKO Disc,Chapter 2,bicycle,CH2-KOKO-DISC,12500000,,COP,Cuadro de ruta carbono Chapter 2 con monocoque integrado. Geometria aerodinamica y comoda.,,https://chapter2cycles.com/,"S,M,L,XL",true,1
+GW Lucky 27.5,GW,bicycle,GW-LUCKY-275,1850000,,COP,Bicicleta MTB rigida con marco aluminio y cambios Shimano. Excelente relacion precio-calidad para iniciar.,,,"S,M,L",true,3
+Kask Mojito 3,Kask,accessory,KASK-MOJ-3,580000,,COP,Casco de ruta ventilado con sistema Octo Fit retencion. Certificado para racing.,,https://www.kask.com/,"S,M,L",true,5
+Kask Utopia Y,Kask,accessory,KASK-UTOPIA-Y,890000,,COP,Casco de ruta aerodinamico para crono y triatlon. Maximo rendimiento y minima resistencia al aire.,,https://www.kask.com/,"S,M,L",true,3
+Oakley Sutro,Oakley,accessory,OAK-SUTRO,720000,,COP,Gafas ciclismo con lente Prizm Road. Vision optimizada para detectar transiciones del pavimento.,,https://www.oakley.com/,One Size,true,8
+KOO Open,KOO,accessory,KOO-OPEN,650000,,COP,Gafas ciclismo italianas con lente Zeiss. Diseno italiano y proteccion UV.,,https://kooworld.cc/,One Size,true,4
+Abus AirBreaker,Abus,accessory,ABUS-AIR,890000,,COP,Casco aerodinamico de altisima ventilacion. Certificado para racing UCI.,,https://www.abus.com/,"S,M,L",true,2
+Wahoo Element BOLT V2,Wahoo,accessory,WAHOO-BOLT-V2,1450000,,COP,GPS computer para ciclismo con pantalla a color y sensores ANT+/BLE. Integracion completa con Zwift y Strava.,,https://eu.wahoofitness.com/,One Size,true,3
+Lezyne Macro Drive 1300+,Lezyne,accessory,LEZ-MACRO-1300,420000,,COP,Luz frontal con 1300 lumens y bateria recargable USB-C. Hasta 25h modo eco.,,https://www.lezyne.com/,One Size,true,6
+Pirelli P Zero Race 700x28c,Pirelli,component,PIR-PZ-RACE-28,280000,,COP,Cubierta de ruta competencia con compuesto SmartEvo. 700x28c tubeless ready.,,https://www.pirelli.com/tyres/en-ww/bicycle,One Size,true,12
+Maxxis Rekon Race 29x2.25,Maxxis,component,MAX-REKON-29,310000,,COP,Cubierta MTB XC para terrenos mixtos. 29x2.25 tubeless ready compuesto Dual.,,https://www.maxxis.com/,One Size,true,8
+Maurten Gel 100,Maurten,nutrition,MAUR-GEL-100,18000,,COP,Gel deportivo con hidrogel patentado para liberacion energetica progresiva. 25g de carbohidratos.,,https://www.maurten.com/,One Size,true,40
+GU Energy Gel,GU,nutrition,GU-GEL,12000,,COP,Gel deportivo de 32g con cafeina opcional. Disponible en multiples sabores.,,https://www.guenergy.com/,One Size,true,60
+Mantenimiento Completo Ruta/MTB,Veloce,service,SRV-MANT-COMP,160000,,COP,Servicio de mantenimiento completo incluye revision general lavado ajuste transmision y frenos lubricacion engrasada de rodamientos.,,,One Size,true,999
+Bike Fit Sistema Retul,Veloce,service,SRV-BIKEFIT,440000,400000,COP,Estudio biomecanico con sistema Retul de captura 3D. Mas comodidad mas eficiencia menos lesiones.,,,One Size,true,999
+Indoor Cycling 3x/semana,Veloce,service,SRV-IND-3X,410000,,COP,Plan mensual de 3 sesiones por semana en Veloce Indoor Cycling. Incluye planificacion en TrainingPeaks y guarda tu bici en tienda.,,,One Size,true,999
