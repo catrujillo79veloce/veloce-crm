@@ -4,7 +4,28 @@ import { MessageCircle, MessageSquare, Camera, BotOff } from "lucide-react"
 import { cn, truncate, formatRelativeTime } from "@/lib/utils"
 import { Avatar } from "@/components/ui"
 import type { ConversationSummary } from "@/app/(crm)/inbox/page"
-import type { InteractionType } from "@/lib/types"
+import type { Interaction, InteractionType } from "@/lib/types"
+
+// Build a preview string for the conversation list, handling media-only msgs.
+function previewFor(interaction: Interaction): string {
+  if (interaction.body) return truncate(interaction.body, 50)
+  if (interaction.transcription) return `🎤 ${truncate(interaction.transcription, 45)}`
+  if (interaction.vision_caption) return `📷 ${truncate(interaction.vision_caption, 45)}`
+  switch (interaction.media_type) {
+    case "image":
+      return "📷 Foto"
+    case "audio":
+      return "🎤 Audio"
+    case "video":
+      return "🎬 Video"
+    case "document":
+      return "📄 Documento"
+    case "sticker":
+      return "✨ Sticker"
+    default:
+      return ""
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Channel icon helper
@@ -93,7 +114,7 @@ export default function ConversationList({
                   )}
                 >
                   {lastInteraction.direction === "outbound" && "Tu: "}
-                  {truncate(lastInteraction.body ?? "", 50)}
+                  {previewFor(lastInteraction)}
                 </span>
                 {contact.ai_enabled === false && (
                   <span

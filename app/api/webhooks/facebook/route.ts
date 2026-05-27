@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
 import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
+import { extractFirstAttachment } from "@/lib/integrations/instagram"
+import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
+import { transcribeAudio } from "@/lib/ai/transcribe"
+import { captionImage } from "@/lib/ai/vision"
+import { buildAIInput } from "@/lib/ai/build-ai-input"
 
 // Allow up to 60s for AI response generation + Facebook send
 export const maxDuration = 60
@@ -93,8 +98,12 @@ async function processMessengerMessages(body: any) {
         if (!event.message) continue
         if (event.message.is_echo) continue
 
-        const text = event.message.text
-        if (!text) continue
+        const text: string = event.message.text ?? ""
+        const attachments = event.message.attachments ?? []
+        const media = extractFirstAttachment(attachments)
+
+        // Need at least text or media to proceed
+        if (!text && !media) continue
 
         const senderId: string = event.sender?.id ?? ""
         const messageId: string = event.message.mid ?? ""
@@ -154,6 +163,43 @@ async function processMessengerMessages(body: any) {
           console.log("[Messenger] New contact:", contactId)
         }
 
+        // --- Media: download → store → transcribe/caption ---
+        let mediaUrl: string | null = null
+        let mediaMime: string | null = null
+        let mediaType: string | null = null
+        let transcription: string | null = null
+        let visionCaption: string | null = null
+
+        if (media) {
+          try {
+            const stored = await downloadAndStore({
+              supabase,
+              metaUrl: media.url,
+              contactId,
+              kind: media.kind,
+              mime: media.mime,
+            })
+            mediaUrl = stored.url
+            mediaMime = media.mime
+            mediaType = media.kind
+
+            if (media.kind === "audio") {
+              transcription = await transcribeAudio({
+                audioUrl: stored.url,
+                mime: mediaMime,
+              })
+            }
+            if (media.kind === "image") {
+              visionCaption = await captionImage({
+                imageUrl: stored.url,
+                mime: mediaMime,
+              })
+            }
+          } catch (e) {
+            console.error("[Messenger] Media processing failed:", e)
+          }
+        }
+
         // --- Save inbound ---
         await supabase.from("crm_interactions").insert({
           contact_id: contactId,
@@ -162,6 +208,11 @@ async function processMessengerMessages(body: any) {
           body: text,
           channel_message_id: messageId,
           channel_metadata: { sender_id: senderId, timestamp },
+          media_url: mediaUrl,
+          media_type: mediaType,
+          media_mime: mediaMime,
+          transcription,
+          vision_caption: visionCaption,
           occurred_at: new Date(timestamp).toISOString(),
         })
 
@@ -216,8 +267,20 @@ async function processMessengerMessages(body: any) {
             content: h.body as string,
           }))
 
-        // --- AI response ---
-        const aiResponse = await generateAgentResponse(text, conversationHistory)
+        // --- AI response (using media context when no text) ---
+        const promptForAI = buildAIInput({
+          text,
+          transcription,
+          visionCaption,
+          mediaType,
+        })
+        if (!promptForAI) {
+          continue
+        }
+        const aiResponse = await generateAgentResponse(
+          promptForAI,
+          conversationHistory
+        )
 
         // --- Send via Messenger ---
         const sent = await sendFacebookMessage(senderId, aiResponse)

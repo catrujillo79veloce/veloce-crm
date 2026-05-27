@@ -193,6 +193,13 @@ export interface Interaction {
   channel_metadata: Record<string, unknown> | null
   team_member_id: string | null
   team_member?: TeamMember
+  // Media attachments (image / audio / video / document / sticker)
+  media_url?: string | null
+  media_type?: string | null
+  media_mime?: string | null
+  media_caption?: string | null
+  transcription?: string | null
+  vision_caption?: string | null
   occurred_at: string
   created_at: string
 }

@@ -171,12 +171,29 @@ export async function sendWhatsAppTemplate(
 // Parse incoming WhatsApp webhook payload
 // ---------------------------------------------------------------------------
 
+export type WhatsAppMediaKind =
+  | "image"
+  | "audio"
+  | "video"
+  | "document"
+  | "sticker"
+
 export interface ParsedWhatsAppMessage {
   phone: string
+  /** Text body, or empty string if the message is media-only. */
   message: string
+  /** Caption typed alongside an image/video, if any. */
+  caption?: string
   messageId: string
   timestamp: string
   senderName?: string
+  /** Present when the message contains media. */
+  media?: {
+    id: string
+    kind: WhatsAppMediaKind
+    mime: string
+    filename?: string
+  }
 }
 
 export function parseWhatsAppWebhook(
@@ -204,7 +221,6 @@ export function parseWhatsAppWebhook(
         }
 
         for (const msg of value.messages) {
-          // Only process text messages for now
           const text =
             msg.text?.body ??
             msg.button?.text ??
@@ -212,14 +228,21 @@ export function parseWhatsAppWebhook(
             msg.interactive?.list_reply?.title ??
             null
 
-          if (!text) continue
+          // Detect media
+          const mediaKind = detectMediaKind(msg)
+          const media = mediaKind ? extractMedia(msg, mediaKind) : undefined
+
+          // Skip messages that have neither text nor media (e.g. system events)
+          if (!text && !media) continue
 
           messages.push({
             phone: msg.from,
-            message: text,
+            message: text ?? "",
+            caption: media ? msg[mediaKind!]?.caption : undefined,
             messageId: msg.id,
             timestamp: msg.timestamp,
             senderName: contactMap.get(msg.from),
+            media,
           })
         }
       }
@@ -229,4 +252,29 @@ export function parseWhatsAppWebhook(
   }
 
   return messages
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectMediaKind(msg: any): WhatsAppMediaKind | null {
+  if (msg.image) return "image"
+  if (msg.audio) return "audio"
+  if (msg.video) return "video"
+  if (msg.document) return "document"
+  if (msg.sticker) return "sticker"
+  return null
+}
+
+function extractMedia(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  msg: any,
+  kind: WhatsAppMediaKind
+): ParsedWhatsAppMessage["media"] {
+  const m = msg[kind]
+  if (!m?.id) return undefined
+  return {
+    id: m.id,
+    kind,
+    mime: m.mime_type ?? "application/octet-stream",
+    filename: m.filename,
+  }
 }

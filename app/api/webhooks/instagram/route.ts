@@ -9,6 +9,10 @@ import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
+import { downloadAndStore } from "@/lib/integrations/media-storage"
+import { transcribeAudio } from "@/lib/ai/transcribe"
+import { captionImage } from "@/lib/ai/vision"
+import { buildAIInput } from "@/lib/ai/build-ai-input"
 
 // Allow up to 60s for AI response generation + Instagram send
 export const maxDuration = 60
@@ -146,26 +150,70 @@ async function processInstagramMessages(body: any) {
         console.log("[Instagram] New contact created:", contactId)
       }
 
-      // --- Save inbound message ---
-      const { error: inboundInsertError } = await supabase.from("crm_interactions").insert({
-        contact_id: contactId,
-        type: "instagram_message",
-        direction: "inbound",
-        subject: null,
-        body: msg.message,
-        channel_message_id: msg.messageId,
-        channel_metadata: {
-          sender_id: msg.senderId,
-          timestamp: msg.timestamp,
-        },
-        occurred_at: new Date(msg.timestamp).toISOString(),
-      })
-      if (inboundInsertError) {
-                // DB unique guard: concurrent process already handled this message
-                console.log("[Instagram] Duplicate webhook suppressed:", msg.messageId)
-                continue
+      // --- Media: download from Meta → store → transcribe/caption ---
+      let mediaUrl: string | null = null
+      let mediaMime: string | null = null
+      let mediaType: string | null = null
+      let transcription: string | null = null
+      let visionCaption: string | null = null
+
+      if (msg.media) {
+        try {
+          const stored = await downloadAndStore({
+            supabase,
+            metaUrl: msg.media.url,
+            contactId,
+            kind: msg.media.kind,
+            mime: msg.media.mime,
+          })
+          mediaUrl = stored.url
+          mediaMime = msg.media.mime
+          mediaType = msg.media.kind
+
+          if (msg.media.kind === "audio") {
+            transcription = await transcribeAudio({
+              audioUrl: stored.url,
+              mime: mediaMime,
+            })
+          }
+          if (msg.media.kind === "image") {
+            visionCaption = await captionImage({
+              imageUrl: stored.url,
+              mime: mediaMime,
+            })
+          }
+        } catch (e) {
+          console.error("[Instagram] Media processing failed:", e)
+        }
       }
-      
+
+      // --- Save inbound message ---
+      const { error: inboundInsertError } = await supabase
+        .from("crm_interactions")
+        .insert({
+          contact_id: contactId,
+          type: "instagram_message",
+          direction: "inbound",
+          subject: null,
+          body: msg.message,
+          channel_message_id: msg.messageId,
+          channel_metadata: {
+            sender_id: msg.senderId,
+            timestamp: msg.timestamp,
+          },
+          media_url: mediaUrl,
+          media_type: mediaType,
+          media_mime: mediaMime,
+          transcription,
+          vision_caption: visionCaption,
+          occurred_at: new Date(msg.timestamp).toISOString(),
+        })
+      if (inboundInsertError) {
+        // DB unique guard: concurrent process already handled this message
+        console.log("[Instagram] Duplicate webhook suppressed:", msg.messageId)
+        continue
+      }
+
       console.log("[Instagram] Inbound saved for:", contactId)
 
       // --- HOT ALERT ---
@@ -219,8 +267,18 @@ async function processInstagramMessages(body: any) {
           content: h.body as string,
         }))
 
-      // --- Generate AI response ---
-      const aiResponse = await generateAgentResponse(msg.message, conversationHistory)
+      // --- Generate AI response (using media context when no text) ---
+      const promptForAI = buildAIInput({
+        text: msg.message,
+        transcription,
+        visionCaption,
+        mediaType,
+      })
+      if (!promptForAI) {
+        // Media we couldn't process and no text — skip the bot silently
+        continue
+      }
+      const aiResponse = await generateAgentResponse(promptForAI, conversationHistory)
 
       // --- Send reply via Instagram API ---
       const sent = await sendInstagramMessage(msg.senderId, aiResponse)

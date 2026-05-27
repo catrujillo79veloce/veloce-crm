@@ -7,6 +7,13 @@ import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
+import {
+  downloadAndStore,
+  getWhatsAppMediaUrl,
+} from "@/lib/integrations/media-storage"
+import { transcribeAudio } from "@/lib/ai/transcribe"
+import { captionImage } from "@/lib/ai/vision"
+import { buildAIInput } from "@/lib/ai/build-ai-input"
 
 // Allow up to 60s for AI response generation + WhatsApp send
 export const maxDuration = 60
@@ -131,18 +138,71 @@ async function processAndReply(body: any) {
         console.log("[WhatsApp] New contact:", contactId)
       }
 
-      // --- Save inbound message ---
+      // --- Save inbound message (with media if present) ---
       const occurredAt = msg.timestamp
         ? new Date(parseInt(msg.timestamp) * 1000).toISOString()
         : new Date().toISOString()
+
+      // --- Media: download from Meta, store in Supabase, optional AI processing ---
+      let mediaUrl: string | null = null
+      let mediaMime: string | null = null
+      let mediaType: string | null = null
+      let transcription: string | null = null
+      let visionCaption: string | null = null
+
+      if (msg.media) {
+        try {
+          const meta = await getWhatsAppMediaUrl(msg.media.id)
+          if (meta?.url) {
+            const stored = await downloadAndStore({
+              supabase,
+              metaUrl: meta.url,
+              bearerToken: process.env.WHATSAPP_ACCESS_TOKEN,
+              contactId,
+              kind: msg.media.kind,
+              mime: meta.mime ?? msg.media.mime,
+              filename: msg.media.filename,
+            })
+            mediaUrl = stored.url
+            mediaMime = meta.mime ?? msg.media.mime
+            mediaType = msg.media.kind
+
+            // Audio → Whisper
+            if (msg.media.kind === "audio") {
+              transcription = await transcribeAudio({
+                audioUrl: stored.url,
+                mime: mediaMime,
+              })
+            }
+            // Image → Claude vision
+            if (msg.media.kind === "image" || msg.media.kind === "sticker") {
+              visionCaption = await captionImage({
+                imageUrl: stored.url,
+                mime: mediaMime,
+              })
+            }
+          }
+        } catch (e) {
+          console.error("[WhatsApp] Media processing failed:", e)
+        }
+      }
 
       await supabase.from("crm_interactions").insert({
         contact_id: contactId,
         type: "whatsapp_message",
         direction: "inbound",
-        body: msg.message,
+        body: msg.message || msg.caption || "",
         channel_message_id: msg.messageId,
-        channel_metadata: { phone: msg.phone, sender_name: msg.senderName ?? null },
+        channel_metadata: {
+          phone: msg.phone,
+          sender_name: msg.senderName ?? null,
+        },
+        media_url: mediaUrl,
+        media_type: mediaType,
+        media_mime: mediaMime,
+        media_caption: msg.caption ?? null,
+        transcription,
+        vision_caption: visionCaption,
         occurred_at: occurredAt,
       })
 
@@ -203,7 +263,20 @@ async function processAndReply(body: any) {
         }))
 
       // --- Generate AI response ---
-      const aiResponse = await generateAgentResponse(msg.message, conversationHistory)
+      // When the message is media-only, give the bot context from
+      // transcription (audio) or vision caption (image) so it can respond.
+      const promptForAI = buildAIInput({
+        text: msg.message,
+        caption: msg.caption,
+        transcription,
+        visionCaption,
+        mediaType,
+      })
+      if (!promptForAI) {
+        // Nothing the bot can respond to — skip silently
+        continue
+      }
+      const aiResponse = await generateAgentResponse(promptForAI, conversationHistory)
 
       // --- Send reply via WhatsApp API ---
       const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)

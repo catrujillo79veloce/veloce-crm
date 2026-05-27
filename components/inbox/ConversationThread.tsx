@@ -14,6 +14,7 @@ import { cn, formatDateTime } from "@/lib/utils"
 import { Avatar, LoadingSpinner } from "@/components/ui"
 import { createClient } from "@/lib/supabase/client"
 import MessageComposer from "./MessageComposer"
+import MessageMedia from "./MessageMedia"
 import type { Contact, Interaction, InteractionType } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
@@ -302,10 +303,24 @@ export default function ConversationThread({
                     </p>
                   )}
 
-                  {/* Message body */}
-                  <p className="text-sm whitespace-pre-wrap break-words">
-                    {msg.body}
-                  </p>
+                  {/* Media attachment (image / audio / video / document) */}
+                  {msg.media_url && msg.media_type && (
+                    <MessageMedia
+                      url={msg.media_url}
+                      type={msg.media_type}
+                      mime={msg.media_mime}
+                      transcription={msg.transcription}
+                      visionCaption={msg.vision_caption}
+                      isOutbound={isOutbound}
+                    />
+                  )}
+
+                  {/* Message body (caption or plain text) */}
+                  {msg.body && (
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {msg.body}
+                    </p>
+                  )}
 
                   {/* Timestamp */}
                   <p
