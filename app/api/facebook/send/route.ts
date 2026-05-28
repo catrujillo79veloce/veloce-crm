@@ -72,10 +72,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message (human reply → HUMAN_AGENT tag, 7-day window) ---
-    const result = await sendFacebookMessage(contact.facebook_id, message.trim(), {
-      humanAgent: true,
-    })
+    // --- Send message ---
+    // NOTE: HUMAN_AGENT tag (7-day window) requires Meta App Review approval.
+    // Until approved we send standard, which works within the 24h window.
+    const result = await sendFacebookMessage(contact.facebook_id, message.trim())
 
     if (!result.ok) {
       return NextResponse.json(

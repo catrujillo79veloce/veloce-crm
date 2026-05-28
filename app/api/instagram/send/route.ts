@@ -72,10 +72,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message (human reply → HUMAN_AGENT tag, 7-day window) ---
-    const result = await sendInstagramMessage(contact.instagram_id, message.trim(), {
-      humanAgent: true,
-    })
+    // --- Send message ---
+    // NOTE: HUMAN_AGENT tag (7-day window) requires Meta App Review approval
+    // of the "Human Agent" feature. Until that's approved we send standard,
+    // which works within the 24h window.
+    const result = await sendInstagramMessage(contact.instagram_id, message.trim())
 
     if (!result.ok) {
       return NextResponse.json(

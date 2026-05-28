@@ -73,14 +73,14 @@ function parseInstagramError(
     const subcode = json?.error?.error_subcode
     const message: string = json?.error?.message ?? ""
 
-    // Outside the messaging window (Instagram policy). With the HUMAN_AGENT
-    // tag the window is 7 days; if this still fails, the customer's last DM
-    // was over 7 days ago and they must write again first.
+    // Outside the 24h messaging window (Instagram policy). Meta only lets you
+    // reply for free within 24h of the customer's last DM. After that you must
+    // wait for them to write again (or contact them by WhatsApp/phone).
     if ((code === 10 && /policy|window/i.test(message)) || /allowed window/i.test(message)) {
       return {
         errorCode: code,
         error:
-          "El cliente no escribe hace mas de 7 dias. Instagram solo deja responder dentro de esa ventana — espera a que el cliente escriba de nuevo.",
+          "Pasaron mas de 24h desde el ultimo DM del cliente. Instagram solo deja responder dentro de esa ventana — espera a que el cliente escriba de nuevo o contactalo por WhatsApp/llamada.",
       }
     }
     // Token issues
