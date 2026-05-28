@@ -1,9 +1,10 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { Search, Bell, Globe } from "lucide-react"
+import { Bell, Globe } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
+import GlobalSearch from "./GlobalSearch"
 
 const routeLabels: Record<string, { labelKey: keyof typeof import("@/lib/i18n/es.json")["nav"] }> = {
   "/dashboard": { labelKey: "dashboard" },
@@ -54,27 +55,13 @@ export default function TopBar({ userName = "Usuario", avatarUrl }: TopBarProps)
 
       {/* Center: Search */}
       <div className="flex-1 flex justify-center px-4">
-        <div className="relative w-full max-w-md">
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-            size={16}
-          />
-          <input
-            type="search"
-            placeholder={
-              locale === "es"
-                ? "Buscar contactos, leads, ventas..."
-                : "Search contacts, leads, deals..."
-            }
-            className={cn(
-              "w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg",
-              "placeholder:text-gray-400 text-gray-900",
-              "focus:outline-none focus:ring-2 focus:ring-veloce-500/20 focus:border-veloce-500",
-              "transition-colors"
-            )}
-            aria-label="Global search"
-          />
-        </div>
+        <GlobalSearch
+          placeholder={
+            locale === "es"
+              ? "Buscar contactos, productos, reservas, taller..."
+              : "Search contacts, products, reservations, workshop..."
+          }
+        />
       </div>
 
       {/* Right: Actions */}
