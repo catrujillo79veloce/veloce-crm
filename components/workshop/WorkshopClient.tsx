@@ -10,6 +10,7 @@ import {
   Check,
   X,
   Bike,
+  Star,
 } from "lucide-react"
 import { useToast } from "@/components/ui/Toast"
 import NewTicketDialog from "./NewTicketDialog"
@@ -107,6 +108,25 @@ export default function WorkshopClient() {
       fetchTickets()
     } catch {
       toast("error", "No se pudo actualizar")
+    }
+  }
+
+  async function askReview(contactId: string | undefined) {
+    if (!contactId) return
+    try {
+      const res = await fetch("/api/reviews/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contactId }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        toast("error", body.error ?? "No se pudo enviar")
+        return
+      }
+      toast("success", "Solicitud de reseña enviada ⭐")
+    } catch {
+      toast("error", "Error de red")
     }
   }
 
@@ -217,22 +237,34 @@ export default function WorkshopClient() {
                   .map((t) => (
                     <div
                       key={t.id}
-                      className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm"
+                      className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm"
                     >
-                      <span className="text-gray-700">
+                      <span className="text-gray-700 min-w-0 truncate">
                         #{t.ticket_number} · {t.bike_description} ·{" "}
                         {t.contact?.first_name}
                       </span>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded ${
-                          t.status === "delivered"
-                            ? "bg-gray-100 text-gray-600"
-                            : "bg-red-100 text-red-600"
-                        }`}
-                      >
-                        {t.status === "delivered" ? "Entregada" : "Cancelada"}
-                        {t.final_cost_cop ? ` · ${fmtCop(t.final_cost_cop)}` : ""}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {t.status === "delivered" && t.contact && (
+                          <button
+                            onClick={() => askReview(t.contact?.id)}
+                            className="inline-flex items-center gap-1 text-xs text-amber-600 hover:bg-amber-50 px-2 py-1 rounded font-medium"
+                            title="Enviar solicitud de reseña por WhatsApp"
+                          >
+                            <Star className="h-3.5 w-3.5" />
+                            Pedir reseña
+                          </button>
+                        )}
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded ${
+                            t.status === "delivered"
+                              ? "bg-gray-100 text-gray-600"
+                              : "bg-red-100 text-red-600"
+                          }`}
+                        >
+                          {t.status === "delivered" ? "Entregada" : "Cancelada"}
+                          {t.final_cost_cop ? ` · ${fmtCop(t.final_cost_cop)}` : ""}
+                        </span>
+                      </div>
                     </div>
                   ))}
               </div>

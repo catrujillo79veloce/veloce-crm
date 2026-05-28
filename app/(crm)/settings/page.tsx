@@ -12,6 +12,7 @@ import {
 import { Card, CardContent } from "@/components/ui"
 import { useI18n } from "@/lib/i18n/config"
 import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
+import GoogleReviewSetting from "@/components/settings/GoogleReviewSetting"
 
 const settingsSections = [
   {
@@ -81,6 +82,8 @@ export default function SettingsPage() {
       </div>
 
       <AIGlobalPauseToggle />
+
+      <GoogleReviewSetting />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {settingsSections.map((section) => {
