@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n/config"
 import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
 import GoogleReviewSetting from "@/components/settings/GoogleReviewSetting"
 import PushNotificationSetting from "@/components/push/PushNotificationSetting"
+import SignatureSetting from "@/components/settings/SignatureSetting"
 
 const settingsSections = [
   {
@@ -85,6 +86,8 @@ export default function SettingsPage() {
       <AIGlobalPauseToggle />
 
       <PushNotificationSetting />
+
+      <SignatureSetting />
 
       <GoogleReviewSetting />
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import {
   Send,
   MessageCircle,
@@ -16,7 +16,8 @@ import {
 import { cn } from "@/lib/utils"
 import CannedResponsesPicker from "./CannedResponsesPicker"
 import ProductPickerPopover, { type PickedProduct } from "./ProductPickerPopover"
-import { Package } from "lucide-react"
+import EmojiPicker from "./EmojiPicker"
+import { Package, Smile } from "lucide-react"
 import type {
   CannedResponse,
   Contact,
@@ -74,6 +75,11 @@ export default function MessageComposer({
   const [pickerFilter, setPickerFilter] = useState("")
   const [uploading, setUploading] = useState(false)
   const [productPickerOpen, setProductPickerOpen] = useState(false)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [signature, setSignature] = useState<{ text: string; enabled: boolean }>({
+    text: "",
+    enabled: false,
+  })
   const [attachment, setAttachment] = useState<{
     url: string
     mime: string
@@ -85,6 +91,36 @@ export default function MessageComposer({
 
   const channel = CHANNEL_CONFIG[channelType] ?? CHANNEL_CONFIG.whatsapp_message
   const ChannelIcon = channel.icon
+
+  // Load the optional manual-message signature once
+  useEffect(() => {
+    fetch("/api/settings/signature", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && d.enabled && d.text) {
+          setSignature({ text: d.text, enabled: true })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const insertEmoji = useCallback((emoji: string) => {
+    const el = textareaRef.current
+    if (!el) {
+      setText((t) => t + emoji)
+      return
+    }
+    const start = el.selectionStart ?? text.length
+    const end = el.selectionEnd ?? text.length
+    const next = text.slice(0, start) + emoji + text.slice(end)
+    setText(next)
+    // Restore cursor right after the inserted emoji
+    setTimeout(() => {
+      el.focus()
+      const pos = start + emoji.length
+      el.setSelectionRange(pos, pos)
+    }, 0)
+  }, [text])
 
   const handlePickProduct = useCallback((p: PickedProduct) => {
     const fmt = (n: number) => "$" + Number(n).toLocaleString("es-CO")
@@ -148,6 +184,12 @@ export default function MessageComposer({
     if ((!trimmed && !attachment) || sending) return
     setError("")
 
+    // Append the optional signature to text messages
+    const outgoing =
+      trimmed && signature.enabled && signature.text
+        ? `${trimmed}\n\n${signature.text}`
+        : trimmed
+
     const apiEndpoint =
       channelType === "whatsapp_message"
         ? "/api/whatsapp/send"
@@ -166,7 +208,7 @@ export default function MessageComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contactId: contact.id,
-          message: trimmed,
+          message: outgoing,
           mediaUrl: attachment?.url,
           mediaKind: attachment?.kind,
           mediaMime: attachment?.mime,
@@ -186,7 +228,7 @@ export default function MessageComposer({
           type: channelType,
           direction: "outbound",
           subject: null,
-          body: trimmed,
+          body: outgoing,
           media_url: attachment?.url ?? null,
           media_type: attachment?.kind ?? null,
           media_mime: attachment?.mime ?? null,
@@ -208,7 +250,7 @@ export default function MessageComposer({
     } finally {
       setSending(false)
     }
-  }, [text, attachment, sending, channelType, contact.id, onMessageSent])
+  }, [text, attachment, sending, channelType, contact.id, onMessageSent, signature])
 
   // Open the canned-responses picker when the user starts typing "/" at the
   // beginning of an empty composer. The text after "/" becomes the initial
@@ -277,6 +319,13 @@ export default function MessageComposer({
         open={productPickerOpen}
         onClose={() => setProductPickerOpen(false)}
         onPick={handlePickProduct}
+      />
+
+      {/* Emoji picker popover */}
+      <EmojiPicker
+        open={emojiOpen}
+        onClose={() => setEmojiOpen(false)}
+        onPick={(e) => insertEmoji(e)}
       />
 
       {/* Error display */}
@@ -368,6 +417,21 @@ export default function MessageComposer({
           )}
         >
           <Package className="w-4 h-4" />
+        </button>
+
+        {/* Emoji button */}
+        <button
+          type="button"
+          onClick={() => setEmojiOpen((v) => !v)}
+          title="Emojis"
+          className={cn(
+            "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors border",
+            emojiOpen
+              ? "bg-veloce-50 border-veloce-300 text-veloce-700"
+              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-veloce-600"
+          )}
+        >
+          <Smile className="w-4 h-4" />
         </button>
 
         {/* Canned-responses button */}
