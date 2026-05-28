@@ -15,6 +15,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import CannedResponsesPicker from "./CannedResponsesPicker"
+import ProductPickerPopover, { type PickedProduct } from "./ProductPickerPopover"
+import { Package } from "lucide-react"
 import type {
   CannedResponse,
   Contact,
@@ -71,6 +73,7 @@ export default function MessageComposer({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerFilter, setPickerFilter] = useState("")
   const [uploading, setUploading] = useState(false)
+  const [productPickerOpen, setProductPickerOpen] = useState(false)
   const [attachment, setAttachment] = useState<{
     url: string
     mime: string
@@ -82,6 +85,29 @@ export default function MessageComposer({
 
   const channel = CHANNEL_CONFIG[channelType] ?? CHANNEL_CONFIG.whatsapp_message
   const ChannelIcon = channel.icon
+
+  const handlePickProduct = useCallback((p: PickedProduct) => {
+    const fmt = (n: number) => "$" + Number(n).toLocaleString("es-CO")
+    const name = `${p.brand ? p.brand + " " : ""}${p.name}`
+    const priceLine = p.sale_price
+      ? `🔥 OFERTA: ${fmt(p.sale_price)} (antes ${fmt(p.price)})`
+      : `💰 ${fmt(p.price)}`
+    const lines = [`🚲 ${name}`, priceLine]
+    if (p.external_url) lines.push(p.external_url)
+    lines.push("¿Te interesa? Escríbenos o pásate por Veloce El Poblado 🙌")
+
+    setText(lines.join("\n"))
+    if (p.image_url) {
+      setAttachment({
+        url: p.image_url,
+        mime: "image/jpeg",
+        kind: "image",
+        filename: `${p.name}.jpg`,
+      })
+    }
+    setProductPickerOpen(false)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [])
 
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,6 +272,13 @@ export default function MessageComposer({
         onPick={handlePickTemplate}
       />
 
+      {/* Product picker popover */}
+      <ProductPickerPopover
+        open={productPickerOpen}
+        onClose={() => setProductPickerOpen(false)}
+        onPick={handlePickProduct}
+      />
+
       {/* Error display */}
       {error && (
         <div className="mb-2 text-xs text-red-600 flex items-center gap-1">
@@ -320,6 +353,21 @@ export default function MessageComposer({
           )}
         >
           <Paperclip className="w-4 h-4" />
+        </button>
+
+        {/* Send-product button */}
+        <button
+          type="button"
+          onClick={() => setProductPickerOpen((v) => !v)}
+          title="Enviar producto del catálogo"
+          className={cn(
+            "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors border",
+            productPickerOpen
+              ? "bg-veloce-50 border-veloce-300 text-veloce-700"
+              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-veloce-600"
+          )}
+        >
+          <Package className="w-4 h-4" />
         </button>
 
         {/* Canned-responses button */}
