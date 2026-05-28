@@ -61,6 +61,41 @@ export async function sendFacebookMessage(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Send a media attachment (image / audio / video / file) by public URL.
+// ---------------------------------------------------------------------------
+
+export async function sendFacebookMedia(
+  recipientId: string,
+  type: "image" | "audio" | "video" | "file",
+  url: string
+): Promise<SendResult> {
+  const accessToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
+  if (!accessToken) {
+    return { ok: false, error: "Credenciales de Facebook no configuradas" }
+  }
+  try {
+    const apiUrl = `${GRAPH_API_BASE}/me/messages?access_token=${accessToken}`
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        message: { attachment: { type, payload: { url, is_reusable: true } } },
+      }),
+    })
+    if (!response.ok) {
+      const raw = await response.text()
+      console.error("[Facebook] Media send failed:", response.status, raw)
+      return { ok: false, ...parseMessengerError(raw, response.status) }
+    }
+    return { ok: true }
+  } catch (error) {
+    console.error("[Facebook] Media send exception:", error)
+    return { ok: false, error: "Error de red contactando a Messenger" }
+  }
+}
+
 function parseMessengerError(
   raw: string,
   status: number

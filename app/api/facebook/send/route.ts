@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendFacebookMessage } from "@/lib/integrations/facebook"
+import { sendFacebookMessage, sendFacebookMedia } from "@/lib/integrations/facebook"
 import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
@@ -42,11 +42,12 @@ export async function POST(request: NextRequest) {
 
     // --- Parse body ---
     const body = await request.json()
-    const { contactId, message } = body
+    const { contactId, message, mediaUrl, mediaKind, mediaMime } = body
+    const text = (message ?? "").trim()
 
-    if (!contactId || !message?.trim()) {
+    if (!contactId || (!text && !mediaUrl)) {
       return NextResponse.json(
-        { success: false, error: "Se requiere contactId y mensaje" },
+        { success: false, error: "Se requiere contactId y mensaje o archivo" },
         { status: 400 }
       )
     }
@@ -72,10 +73,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message ---
-    // NOTE: HUMAN_AGENT tag (7-day window) requires Meta App Review approval.
-    // Until approved we send standard, which works within the 24h window.
-    const result = await sendFacebookMessage(contact.facebook_id, message.trim())
+    // --- Send message (media or text) ---
+    let result
+    if (mediaUrl) {
+      const fbKind = (mediaKind as "image" | "audio" | "video" | "document") ?? "file"
+      const attachType = fbKind === "document" ? "file" : fbKind
+      result = await sendFacebookMedia(
+        contact.facebook_id,
+        attachType as "image" | "audio" | "video" | "file",
+        mediaUrl
+      )
+      if (result.ok && text) {
+        await sendFacebookMessage(contact.facebook_id, text)
+      }
+    } else {
+      result = await sendFacebookMessage(contact.facebook_id, text)
+    }
 
     if (!result.ok) {
       return NextResponse.json(
@@ -96,7 +109,10 @@ export async function POST(request: NextRequest) {
         type: "facebook_message",
         direction: "outbound",
         subject: null,
-        body: message.trim(),
+        body: text,
+        media_url: mediaUrl ?? null,
+        media_type: mediaUrl ? (mediaKind ?? "document") : null,
+        media_mime: mediaUrl ? (mediaMime ?? null) : null,
         team_member_id: teamMember.id,
         channel_metadata: {
           facebook_id: contact.facebook_id,

@@ -108,6 +108,59 @@ function parseMetaError(
 }
 
 // ---------------------------------------------------------------------------
+// Send a media message (image / video / audio / document) by public URL.
+// ---------------------------------------------------------------------------
+
+export async function sendWhatsAppMedia(
+  to: string,
+  kind: "image" | "video" | "audio" | "document",
+  link: string,
+  caption?: string,
+  filename?: string
+): Promise<SendResult> {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  if (!phoneNumberId || !accessToken) {
+    return { ok: false, error: "Credenciales de WhatsApp no configuradas" }
+  }
+
+  // Build the per-type media object. Only image/video/document accept a caption.
+  const mediaObj: Record<string, unknown> = { link }
+  if (caption && (kind === "image" || kind === "video" || kind === "document")) {
+    mediaObj.caption = caption
+  }
+  if (kind === "document" && filename) mediaObj.filename = filename
+
+  try {
+    const cleanTo = to.replace(/\+/g, "")
+    const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanTo,
+        type: kind,
+        [kind]: mediaObj,
+      }),
+    })
+    if (!response.ok) {
+      const raw = await response.text()
+      console.error("[WhatsApp] Media send failed:", response.status, raw)
+      return { ok: false, ...parseMetaError(raw, response.status) }
+    }
+    return { ok: true }
+  } catch (error) {
+    console.error("[WhatsApp] Media send exception:", error)
+    return { ok: false, error: "Error de red contactando a WhatsApp" }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Send an approved WhatsApp template message (HSM / marketing broadcast).
 // `bodyParams` fill {{1}}, {{2}}, ... placeholders in the template body.
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendInstagramMessage } from "@/lib/integrations/instagram"
+import { sendInstagramMessage, sendInstagramMedia } from "@/lib/integrations/instagram"
 import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
@@ -42,11 +42,12 @@ export async function POST(request: NextRequest) {
 
     // --- Parse body ---
     const body = await request.json()
-    const { contactId, message } = body
+    const { contactId, message, mediaUrl, mediaKind, mediaMime } = body
+    const text = (message ?? "").trim()
 
-    if (!contactId || !message?.trim()) {
+    if (!contactId || (!text && !mediaUrl)) {
       return NextResponse.json(
-        { success: false, error: "Se requiere contactId y mensaje" },
+        { success: false, error: "Se requiere contactId y mensaje o archivo" },
         { status: 400 }
       )
     }
@@ -72,11 +73,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message ---
-    // NOTE: HUMAN_AGENT tag (7-day window) requires Meta App Review approval
-    // of the "Human Agent" feature. Until that's approved we send standard,
-    // which works within the 24h window.
-    const result = await sendInstagramMessage(contact.instagram_id, message.trim())
+    // --- Send message (media or text) ---
+    // Instagram supports image/audio/video attachments. Documents fall back to
+    // sending the public URL as text so the customer can still open it.
+    let result
+    if (mediaUrl) {
+      const igKind = mediaKind as "image" | "audio" | "video" | "document"
+      if (igKind === "document") {
+        result = await sendInstagramMessage(
+          contact.instagram_id,
+          `${text ? text + "\n" : ""}${mediaUrl}`
+        )
+      } else {
+        result = await sendInstagramMedia(contact.instagram_id, igKind, mediaUrl)
+        // If there's also a caption, send it as a follow-up text
+        if (result.ok && text) {
+          await sendInstagramMessage(contact.instagram_id, text)
+        }
+      }
+    } else {
+      result = await sendInstagramMessage(contact.instagram_id, text)
+    }
 
     if (!result.ok) {
       return NextResponse.json(
@@ -97,7 +114,10 @@ export async function POST(request: NextRequest) {
         type: "instagram_message",
         direction: "outbound",
         subject: null,
-        body: message.trim(),
+        body: text,
+        media_url: mediaUrl ?? null,
+        media_type: mediaUrl ? (mediaKind ?? "document") : null,
+        media_mime: mediaUrl ? (mediaMime ?? null) : null,
         team_member_id: teamMember.id,
         channel_metadata: {
           instagram_id: contact.instagram_id,

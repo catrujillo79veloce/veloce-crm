@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import { sendWhatsAppMessage, sendWhatsAppMedia } from "@/lib/integrations/whatsapp"
 import { pauseAIForContact } from "@/lib/ai/should-reply"
 
 // ---------------------------------------------------------------------------
@@ -42,11 +42,12 @@ export async function POST(request: NextRequest) {
 
     // --- Parse body ---
     const body = await request.json()
-    const { contactId, message } = body
+    const { contactId, message, mediaUrl, mediaKind, mediaMime, filename } = body
+    const text = (message ?? "").trim()
 
-    if (!contactId || !message?.trim()) {
+    if (!contactId || (!text && !mediaUrl)) {
       return NextResponse.json(
-        { success: false, error: "Se requiere contactId y mensaje" },
+        { success: false, error: "Se requiere contactId y mensaje o archivo" },
         { status: 400 }
       )
     }
@@ -72,11 +73,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message ---
-    const result = await sendWhatsAppMessage(
-      contact.whatsapp_phone.replace("+", ""),
-      message.trim()
-    )
+    // --- Send message (media or text) ---
+    const phone = contact.whatsapp_phone.replace("+", "")
+    const result = mediaUrl
+      ? await sendWhatsAppMedia(
+          phone,
+          (mediaKind as "image" | "video" | "audio" | "document") ?? "document",
+          mediaUrl,
+          text || undefined,
+          filename
+        )
+      : await sendWhatsAppMessage(phone, text)
 
     if (!result.ok) {
       return NextResponse.json(
@@ -97,7 +104,10 @@ export async function POST(request: NextRequest) {
         type: "whatsapp_message",
         direction: "outbound",
         subject: null,
-        body: message.trim(),
+        body: text || (mediaUrl ? "" : ""),
+        media_url: mediaUrl ?? null,
+        media_type: mediaUrl ? (mediaKind ?? "document") : null,
+        media_mime: mediaUrl ? (mediaMime ?? null) : null,
         team_member_id: teamMember.id,
         channel_metadata: {
           phone: contact.whatsapp_phone,

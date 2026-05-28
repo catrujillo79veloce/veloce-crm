@@ -63,6 +63,44 @@ export async function sendInstagramMessage(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Send a media attachment (image / audio / video) by public URL.
+// ---------------------------------------------------------------------------
+
+export async function sendInstagramMedia(
+  recipientId: string,
+  type: "image" | "audio" | "video",
+  url: string
+): Promise<SendResult> {
+  const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN
+  if (!accessToken) {
+    return { ok: false, error: "Credenciales de Instagram no configuradas" }
+  }
+  try {
+    const apiUrl = `${GRAPH_API_BASE}/me/messages`
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        recipient: { id: recipientId },
+        message: { attachment: { type, payload: { url } } },
+      }),
+    })
+    if (!response.ok) {
+      const raw = await response.text()
+      console.error("[Instagram] Media send failed:", response.status, raw)
+      return { ok: false, ...parseInstagramError(raw, response.status) }
+    }
+    return { ok: true }
+  } catch (error) {
+    console.error("[Instagram] Media send exception:", error)
+    return { ok: false, error: "Error de red contactando a Instagram" }
+  }
+}
+
 function parseInstagramError(
   raw: string,
   status: number

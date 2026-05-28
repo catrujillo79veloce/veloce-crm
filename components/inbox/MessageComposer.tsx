@@ -8,6 +8,10 @@ import {
   Camera,
   AlertCircle,
   Sparkles,
+  Paperclip,
+  X,
+  Loader2,
+  FileText,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import CannedResponsesPicker from "./CannedResponsesPicker"
@@ -66,14 +70,56 @@ export default function MessageComposer({
   const [error, setError] = useState("")
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerFilter, setPickerFilter] = useState("")
+  const [uploading, setUploading] = useState(false)
+  const [attachment, setAttachment] = useState<{
+    url: string
+    mime: string
+    kind: string
+    filename: string
+  } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const channel = CHANNEL_CONFIG[channelType] ?? CHANNEL_CONFIG.whatsapp_message
   const ChannelIcon = channel.icon
 
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (file) {
+        setError("")
+        setUploading(true)
+        try {
+          const fd = new FormData()
+          fd.append("file", file)
+          fd.append("contactId", contact.id)
+          const resp = await fetch("/api/media/upload", { method: "POST", body: fd })
+          const data = await resp.json()
+          if (!resp.ok) {
+            setError(data.error || "Error subiendo el archivo")
+          } else {
+            setAttachment({
+              url: data.url,
+              mime: data.mime,
+              kind: data.kind,
+              filename: data.filename,
+            })
+          }
+        } catch {
+          setError("Error subiendo el archivo")
+        } finally {
+          setUploading(false)
+        }
+      }
+      // Reset the input so selecting the same file again re-triggers change
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    },
+    [contact.id]
+  )
+
   const handleSend = useCallback(async () => {
     const trimmed = text.trim()
-    if (!trimmed || sending) return
+    if ((!trimmed && !attachment) || sending) return
     setError("")
 
     const apiEndpoint =
@@ -95,6 +141,10 @@ export default function MessageComposer({
         body: JSON.stringify({
           contactId: contact.id,
           message: trimmed,
+          mediaUrl: attachment?.url,
+          mediaKind: attachment?.kind,
+          mediaMime: attachment?.mime,
+          filename: attachment?.filename,
         }),
       })
 
@@ -111,6 +161,9 @@ export default function MessageComposer({
           direction: "outbound",
           subject: null,
           body: trimmed,
+          media_url: attachment?.url ?? null,
+          media_type: attachment?.kind ?? null,
+          media_mime: attachment?.mime ?? null,
           channel_message_id: null,
           channel_metadata: null,
           team_member_id: null,
@@ -119,6 +172,7 @@ export default function MessageComposer({
         }
         onMessageSent(newInteraction)
         setText("")
+        setAttachment(null)
         textareaRef.current?.focus()
       } else {
         setError(result.error || "Error al enviar")
@@ -128,7 +182,7 @@ export default function MessageComposer({
     } finally {
       setSending(false)
     }
-  }, [text, sending, channelType, contact.id, onMessageSent])
+  }, [text, attachment, sending, channelType, contact.id, onMessageSent])
 
   // Open the canned-responses picker when the user starts typing "/" at the
   // beginning of an empty composer. The text after "/" becomes the initial
@@ -200,11 +254,73 @@ export default function MessageComposer({
         </div>
       )}
 
+      {/* Attachment preview */}
+      {(attachment || uploading) && (
+        <div className="mb-2 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2 max-w-xs">
+          {uploading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+              <span className="text-xs text-gray-500">Subiendo archivo...</span>
+            </>
+          ) : attachment ? (
+            <>
+              {attachment.kind === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={attachment.url}
+                  alt={attachment.filename}
+                  className="w-10 h-10 rounded object-cover flex-shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-5 h-5 text-gray-500" />
+                </div>
+              )}
+              <span className="text-xs text-gray-700 truncate flex-1">
+                {attachment.filename}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAttachment(null)}
+                className="flex-shrink-0 text-gray-400 hover:text-red-500"
+                title="Quitar archivo"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept="image/*,video/*,audio/*,application/pdf"
+        onChange={handleFileChange}
+      />
+
       <div className="flex items-end gap-2">
         {/* Channel indicator */}
         <div className="flex-shrink-0 pb-1.5">
           <ChannelIcon className={cn("w-5 h-5", channel.color)} />
         </div>
+
+        {/* Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || sending}
+          title="Adjuntar archivo o foto"
+          className={cn(
+            "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors border",
+            "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-veloce-600",
+            (uploading || sending) && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          <Paperclip className="w-4 h-4" />
+        </button>
 
         {/* Canned-responses button */}
         <button
@@ -239,16 +355,20 @@ export default function MessageComposer({
         {/* Send button */}
         <button
           onClick={handleSend}
-          disabled={!text.trim() || sending}
+          disabled={(!text.trim() && !attachment) || sending || uploading}
           className={cn(
             "flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
-            text.trim() && !sending
+            (text.trim() || attachment) && !sending && !uploading
               ? "bg-veloce-500 text-white hover:bg-veloce-600"
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           )}
           title="Enviar (Enter)"
         >
-          <Send className="w-4 h-4" />
+          {sending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
         </button>
       </div>
 

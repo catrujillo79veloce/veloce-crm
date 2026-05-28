@@ -94,6 +94,48 @@ export async function downloadAndStore(
 }
 
 // ---------------------------------------------------------------------------
+// Upload raw bytes (e.g. a file the agent attaches from the CRM) to Storage.
+// ---------------------------------------------------------------------------
+
+export async function uploadBytesToStorage(params: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+  bytes: Uint8Array
+  contactId: string
+  mime: string
+  filename?: string
+}): Promise<StoreResult> {
+  const { supabase, bytes, contactId, mime, filename } = params
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+  const ext = pickExtension(mime, filename)
+  const safeName = filename
+    ? filename.replace(/[^a-zA-Z0-9.\-_]/g, "_")
+    : `outbound-${randomUUID()}${ext}`
+  const storagePath = `${contactId}/out-${today}-${randomUUID().slice(0, 8)}-${safeName}`
+
+  const { error: upErr } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, bytes, { contentType: mime, upsert: false })
+  if (upErr) {
+    throw new Error(`[MediaStorage] Upload failed: ${upErr.message}`)
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath)
+
+  return { url: publicUrl, storagePath }
+}
+
+/** Infer a coarse media kind from a MIME type. */
+export function kindFromMime(mime: string): MediaKind {
+  if (mime.startsWith("image/")) return "image"
+  if (mime.startsWith("audio/")) return "audio"
+  if (mime.startsWith("video/")) return "video"
+  return "document"
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
