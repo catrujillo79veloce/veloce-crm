@@ -108,23 +108,35 @@ function parseMetaError(
 }
 
 // ---------------------------------------------------------------------------
-// Send a template message (for HSM / first-contact 24h window)
+// Send an approved WhatsApp template message (HSM / marketing broadcast).
+// `bodyParams` fill {{1}}, {{2}}, ... placeholders in the template body.
 // ---------------------------------------------------------------------------
 
 export async function sendWhatsAppTemplate(
   to: string,
   templateName: string,
-  params: string[]
-): Promise<boolean> {
+  languageCode: string,
+  bodyParams: string[] = []
+): Promise<SendResult> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
 
   if (!phoneNumberId || !accessToken) {
-    console.error("[WhatsApp] Missing env vars for template send")
-    return false
+    return { ok: false, error: "Credenciales de WhatsApp no configuradas" }
   }
 
+  const components =
+    bodyParams.length > 0
+      ? [
+          {
+            type: "body",
+            parameters: bodyParams.map((p) => ({ type: "text", text: p })),
+          },
+        ]
+      : undefined
+
   try {
+    const cleanTo = to.replace(/\+/g, "")
     const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`
     const response = await fetch(url, {
       method: "POST",
@@ -134,36 +146,26 @@ export async function sendWhatsAppTemplate(
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
-        to,
+        recipient_type: "individual",
+        to: cleanTo,
         type: "template",
         template: {
           name: templateName,
-          language: { code: "es" },
-          components: params.length > 0
-            ? [
-                {
-                  type: "body",
-                  parameters: params.map((p) => ({
-                    type: "text",
-                    text: p,
-                  })),
-                },
-              ]
-            : [],
+          language: { code: languageCode || "es" },
+          ...(components ? { components } : {}),
         },
       }),
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      console.error("[WhatsApp] Template send failed:", response.status, err)
-      return false
+      const raw = await response.text()
+      console.error("[WhatsApp] Template send failed:", response.status, raw)
+      return { ok: false, ...parseMetaError(raw, response.status) }
     }
-
-    return true
+    return { ok: true }
   } catch (error) {
     console.error("[WhatsApp] Template send exception:", error)
-    return false
+    return { ok: false, error: "Error de red contactando a WhatsApp" }
   }
 }
 
