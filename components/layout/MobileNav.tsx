@@ -8,6 +8,7 @@ import {
   Users,
   Target,
   Inbox,
+  Calendar,
   MoreHorizontal,
   DollarSign,
   CheckSquare,
@@ -28,6 +29,7 @@ const mainTabs = [
 ]
 
 const moreTabs = [
+  { icon: Calendar, labelKey: "agenda" as const, href: "/agenda" },
   { icon: DollarSign, labelKey: "deals" as const, href: "/deals" },
   { icon: CheckSquare, labelKey: "tasks" as const, href: "/tasks" },
   { icon: Package, labelKey: "products" as const, href: "/products" },
