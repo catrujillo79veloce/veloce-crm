@@ -27,6 +27,7 @@ import { PRODUCT_CATEGORIES } from "@/lib/constants"
 import { toggleProductActive } from "@/app/actions/products"
 import { ProductForm } from "./ProductForm"
 import { ProductsImportDialog } from "./ProductsImportDialog"
+import ProductImageButton from "./ProductImageButton"
 import type { Product } from "@/lib/types"
 
 interface ProductsGridProps {
@@ -199,6 +200,12 @@ export function ProductsGrid({ products, total }: ProductsGridProps) {
                         </Badge>
                       </div>
                     )}
+
+                    {/* Upload / change photo */}
+                    <ProductImageButton
+                      productId={product.id}
+                      hasImage={!!product.image_url}
+                    />
                   </div>
 
                   <CardContent>
