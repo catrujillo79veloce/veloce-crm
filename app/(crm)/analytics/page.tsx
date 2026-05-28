@@ -7,6 +7,7 @@ import {
   Users,
   Filter,
   ArrowRight,
+  Activity,
 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/config"
 import DateRangeSelector, {
@@ -51,6 +52,15 @@ const navCards = [
     descEs: "Rendimiento por canal, conversion y comparacion",
     descEn: "Channel performance, conversion and comparison",
     color: "bg-purple-50 text-purple-600",
+  },
+  {
+    href: "/analytics/operacion",
+    icon: Activity,
+    titleEs: "Operación",
+    titleEn: "Operations",
+    descEs: "Agenda, reservas, taller, mensajería y reseñas",
+    descEn: "Agenda, reservations, workshop, messaging and reviews",
+    color: "bg-amber-50 text-amber-600",
   },
 ]
 
