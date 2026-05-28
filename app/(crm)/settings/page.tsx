@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui"
 import { useI18n } from "@/lib/i18n/config"
 import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
 import GoogleReviewSetting from "@/components/settings/GoogleReviewSetting"
+import PushNotificationSetting from "@/components/push/PushNotificationSetting"
 
 const settingsSections = [
   {
@@ -82,6 +83,8 @@ export default function SettingsPage() {
       </div>
 
       <AIGlobalPauseToggle />
+
+      <PushNotificationSetting />
 
       <GoogleReviewSetting />
 

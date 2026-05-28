@@ -2,6 +2,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server"
 import Sidebar from "@/components/layout/Sidebar"
 import TopBar from "@/components/layout/TopBar"
 import MobileNav from "@/components/layout/MobileNav"
+import ServiceWorkerRegister from "@/components/push/ServiceWorkerRegister"
 
 async function getCurrentUser() {
   try {
@@ -55,6 +56,9 @@ export default async function CRMLayout({
 
       {/* Mobile bottom navigation */}
       <MobileNav />
+
+      {/* PWA service worker registration (silent) */}
+      <ServiceWorkerRegister />
     </div>
   )
 }

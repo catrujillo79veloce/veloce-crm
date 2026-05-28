@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import { sendPush } from "@/lib/push/send"
 import type { createAdminClient } from "@/lib/supabase/admin"
 
 const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
@@ -80,11 +81,23 @@ export async function notifyAdminOfNewMessage(
 
 🔗 ${CRM_BASE_URL}/inbox`
 
-  // --- Send ---
+  // --- Push notification to all team devices (fire-and-forget) ---
+  sendPush(
+    {
+      title: `${emoji} ${contactName}`,
+      body: preview,
+      url: "/inbox",
+      tag: `contact-${contactId}`,
+    }
+  ).catch((e) => console.error("[NotifyAdmin] Push failed:", e))
+
+  // --- Send WhatsApp ping ---
   const result = await sendWhatsAppMessage(ADMIN_PHONE, alert)
 
   if (!result.ok) {
     console.error("[NotifyAdmin] Send failed:", result.error)
+    // Push may still have succeeded; treat the debounce as consumed only
+    // when the WhatsApp ping went through (push is best-effort).
     return false
   }
 
