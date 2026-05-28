@@ -31,13 +31,17 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname
 
-  // Skip auth for API routes, webhooks, public lead form, and the public
-  // Veloce landing page used by Google Ads and Meta Ads.
+  // Skip auth for API routes, webhooks, public lead form, the public Veloce
+  // landing page, and PWA assets (manifest, service worker, icons) which must
+  // be reachable without a session for install + push to work.
   if (
     path.startsWith("/api/") ||
     path === "/lead-form" ||
     path === "/veloce" ||
-    path.startsWith("/veloce/")
+    path.startsWith("/veloce/") ||
+    path === "/sw.js" ||
+    path === "/manifest.webmanifest" ||
+    path.startsWith("/icons/")
   ) {
     return supabaseResponse
   }
