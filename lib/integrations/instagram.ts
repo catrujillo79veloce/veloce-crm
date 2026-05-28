@@ -16,13 +16,26 @@ export interface SendResult {
 
 export async function sendInstagramMessage(
   recipientId: string,
-  message: string
+  message: string,
+  options?: { humanAgent?: boolean }
 ): Promise<SendResult> {
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN
 
   if (!accessToken) {
     console.error("[Instagram] Missing INSTAGRAM_ACCESS_TOKEN")
     return { ok: false, error: "Credenciales de Instagram no configuradas" }
+  }
+
+  // The HUMAN_AGENT tag extends the messaging window from 24h to 7 days for a
+  // real person responding to a customer. Only used for manual replies from
+  // the CRM — never for automated bot replies (Meta policy).
+  const payload: Record<string, unknown> = {
+    recipient: { id: recipientId },
+    message: { text: message },
+  }
+  if (options?.humanAgent) {
+    payload.messaging_type = "MESSAGE_TAG"
+    payload.tag = "HUMAN_AGENT"
   }
 
   try {
@@ -33,10 +46,7 @@ export async function sendInstagramMessage(
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: { text: message },
-      }),
+      body: JSON.stringify(payload),
     })
 
     if (!response.ok) {
@@ -63,12 +73,14 @@ function parseInstagramError(
     const subcode = json?.error?.error_subcode
     const message: string = json?.error?.message ?? ""
 
-    // Outside 24h messaging window (Instagram policy)
-    if (code === 10 && /policy/i.test(message)) {
+    // Outside the messaging window (Instagram policy). With the HUMAN_AGENT
+    // tag the window is 7 days; if this still fails, the customer's last DM
+    // was over 7 days ago and they must write again first.
+    if ((code === 10 && /policy|window/i.test(message)) || /allowed window/i.test(message)) {
       return {
         errorCode: code,
         error:
-          "Pasaron mas de 24h desde el ultimo DM del cliente. Instagram no permite enviar fuera de esa ventana.",
+          "El cliente no escribe hace mas de 7 dias. Instagram solo deja responder dentro de esa ventana — espera a que el cliente escriba de nuevo.",
       }
     }
     // Token issues

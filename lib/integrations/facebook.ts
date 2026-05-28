@@ -13,7 +13,8 @@ export interface SendResult {
 
 export async function sendFacebookMessage(
   recipientId: string,
-  message: string
+  message: string,
+  options?: { humanAgent?: boolean }
 ): Promise<SendResult> {
   const accessToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
 
@@ -22,16 +23,28 @@ export async function sendFacebookMessage(
     return { ok: false, error: "Credenciales de Facebook no configuradas" }
   }
 
+  // Human replies use the HUMAN_AGENT tag (7-day window). Bot replies use the
+  // standard RESPONSE type (24h window, always satisfied since bot replies are
+  // triggered by an inbound message).
+  const payload: Record<string, unknown> = options?.humanAgent
+    ? {
+        recipient: { id: recipientId },
+        message: { text: message },
+        messaging_type: "MESSAGE_TAG",
+        tag: "HUMAN_AGENT",
+      }
+    : {
+        recipient: { id: recipientId },
+        message: { text: message },
+        messaging_type: "RESPONSE",
+      }
+
   try {
     const url = `${GRAPH_API_BASE}/me/messages?access_token=${accessToken}`
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: { text: message },
-        messaging_type: "RESPONSE",
-      }),
+      body: JSON.stringify(payload),
     })
 
     if (!response.ok) {

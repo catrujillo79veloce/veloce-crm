@@ -72,8 +72,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // --- Send message ---
-    const result = await sendFacebookMessage(contact.facebook_id, message.trim())
+    // --- Send message (human reply → HUMAN_AGENT tag, 7-day window) ---
+    const result = await sendFacebookMessage(contact.facebook_id, message.trim(), {
+      humanAgent: true,
+    })
 
     if (!result.ok) {
       return NextResponse.json(
