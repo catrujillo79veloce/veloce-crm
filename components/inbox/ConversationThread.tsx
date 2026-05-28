@@ -15,6 +15,7 @@ import { Avatar, LoadingSpinner } from "@/components/ui"
 import { createClient } from "@/lib/supabase/client"
 import MessageComposer from "./MessageComposer"
 import MessageMedia from "./MessageMedia"
+import ContactTagsBar from "./ContactTagsBar"
 import type { Contact, Interaction, InteractionType } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
@@ -227,6 +228,10 @@ export default function ConversationThread({
           <p className="text-xs text-gray-500 truncate">
             {contact.whatsapp_phone || contact.phone || contact.email || ""}
           </p>
+          {/* Contact tags (quick add/remove) */}
+          <div className="mt-1.5">
+            <ContactTagsBar contactId={contact.id} />
+          </div>
         </div>
         {/* AI auto-reply toggle */}
         <button
