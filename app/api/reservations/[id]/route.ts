@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { syncContactPipeline } from "@/lib/ai/pipeline"
 
 // ---------------------------------------------------------------------------
 // PATCH /api/reservations/[id]
@@ -70,6 +72,14 @@ export async function PATCH(
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Reflect status changes in the pipeline (e.g. completed → lead won).
+  const contactId = (data?.contact as { id?: string } | null)?.id
+  if (contactId && (body.status === "completed" || body.deposit_paid === true)) {
+    syncContactPipeline(createAdminClient(), contactId).catch((e) =>
+      console.error("[Reservations] Pipeline sync failed:", e)
+    )
+  }
 
   return NextResponse.json({ reservation: data })
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { generateFollowups, buildFollowupDigest } from "@/lib/ai/followups"
+import { runPipelineAutomation } from "@/lib/ai/pipeline"
 import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,9 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient()
 
+  // 0. Sync the sales pipeline (create/advance leads from signals)
+  const pipeline = await runPipelineAutomation(supabase)
+
   // 1. Auto-create follow-up tasks
   const result = await generateFollowups(supabase)
 
@@ -39,6 +43,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     status: "ok",
+    pipeline,
     created: result.created,
     skipped: result.skipped,
     digestSent,

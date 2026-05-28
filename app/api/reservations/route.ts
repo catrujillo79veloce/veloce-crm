@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { syncContactPipeline } from "@/lib/ai/pipeline"
 
 // ---------------------------------------------------------------------------
 // GET /api/reservations - List reservations
@@ -152,6 +154,11 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Advance the contact's pipeline lead to "negotiation" (fire-and-forget).
+  syncContactPipeline(createAdminClient(), contact_id).catch((e) =>
+    console.error("[Reservations] Pipeline sync failed:", e)
+  )
 
   return NextResponse.json({ reservation: data }, { status: 201 })
 }
