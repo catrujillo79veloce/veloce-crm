@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { Inbox, MessageSquare } from "lucide-react"
+import { Inbox, MessageSquare, ArrowLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EmptyState } from "@/components/ui"
 import { createClient } from "@/lib/supabase/client"
@@ -253,9 +253,15 @@ export default function InboxView({ initialConversations }: InboxViewProps) {
           description="Las conversaciones de WhatsApp, Facebook e Instagram aparaceran aqui."
         />
       ) : (
-        <div className="flex gap-4 flex-1 min-h-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          {/* Left panel - conversation list */}
-          <div className="w-full md:w-1/3 border-r border-gray-200 flex flex-col min-h-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          {/* Left panel - conversation list.
+              On mobile: full width, but hidden once a conversation is open. */}
+          <div
+            className={cn(
+              "w-full md:w-1/3 border-r border-gray-200 flex-col min-h-0",
+              selectedContactId ? "hidden md:flex" : "flex"
+            )}
+          >
             <ConversationList
               conversations={filteredConversations}
               selectedContactId={selectedContactId}
@@ -263,13 +269,31 @@ export default function InboxView({ initialConversations }: InboxViewProps) {
             />
           </div>
 
-          {/* Right panel - conversation thread */}
-          <div className="hidden md:flex md:w-2/3 flex-col min-h-0">
+          {/* Right panel - conversation thread.
+              On mobile: hidden until a conversation is selected, then full width. */}
+          <div
+            className={cn(
+              "w-full md:w-2/3 flex-col min-h-0",
+              selectedConversation ? "flex" : "hidden md:flex"
+            )}
+          >
             {selectedConversation ? (
-              <ConversationThread
-                contact={selectedConversation.contact}
-                channelType={selectedConversation.lastInteraction.type}
-              />
+              <>
+                {/* Mobile-only back button */}
+                <button
+                  onClick={() => setSelectedContactId(null)}
+                  className="md:hidden flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-veloce-700 border-b border-gray-100 flex-shrink-0"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Conversaciones
+                </button>
+                <div className="flex-1 min-h-0">
+                  <ConversationThread
+                    contact={selectedConversation.contact}
+                    channelType={selectedConversation.lastInteraction.type}
+                  />
+                </div>
+              </>
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center text-gray-400">
