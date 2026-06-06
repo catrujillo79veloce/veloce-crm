@@ -37,6 +37,9 @@ export const metadata: Metadata = {
 }
 
 const GOOGLE_ADS_ID = process.env.NEXT_PUBLIC_GOOGLE_ADS_ID
+const WHATSAPP_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_WHATSAPP_LABEL ?? ""
+const MAPS_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_MAPS_LABEL ?? ""
+const CALL_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_CALL_LABEL ?? ""
 
 export default function VeloceLandingLayout({
   children,
@@ -58,6 +61,29 @@ export default function VeloceLandingLayout({
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
               gtag('config', '${GOOGLE_ADS_ID}');
+            `}
+          </Script>
+          {/* Conversion-event listener: fires when a CTA marked with
+              data-conversion="whatsapp|maps|call" is clicked. Each kind only
+              fires if its label env var is set (otherwise it's a no-op). */}
+          <Script id="google-ads-conversions" strategy="afterInteractive">
+            {`
+              (function() {
+                var ID = '${GOOGLE_ADS_ID}';
+                var L = { whatsapp: '${WHATSAPP_LABEL}', maps: '${MAPS_LABEL}', call: '${CALL_LABEL}' };
+                document.addEventListener('click', function(e) {
+                  var t = e.target;
+                  while (t && t.nodeType === 1 && !(t.tagName === 'A' && t.dataset && t.dataset.conversion)) {
+                    t = t.parentNode;
+                  }
+                  if (!t || !t.dataset) return;
+                  var kind = t.dataset.conversion;
+                  var label = L[kind];
+                  if (window.gtag && label) {
+                    window.gtag('event', 'conversion', { send_to: ID + '/' + label });
+                  }
+                }, true);
+              })();
             `}
           </Script>
         </>

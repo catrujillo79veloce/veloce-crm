@@ -155,6 +155,7 @@ export default function VeloceLanding() {
           <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
             <a
               href={WHATSAPP_LINK}
+              data-conversion="whatsapp"
               target="_blank"
               rel="noopener noreferrer"
               className="flex-1 inline-flex items-center justify-center gap-2 bg-white text-veloce-700 hover:bg-veloce-50 font-semibold px-6 py-4 rounded-xl shadow-lg transition"
@@ -164,6 +165,7 @@ export default function VeloceLanding() {
             </a>
             <a
               href={MAPS_LINK}
+              data-conversion="maps"
               target="_blank"
               rel="noopener noreferrer"
               className="flex-1 inline-flex items-center justify-center gap-2 bg-veloce-900/40 hover:bg-veloce-900/60 text-white border border-white/20 font-semibold px-6 py-4 rounded-xl backdrop-blur transition"
@@ -173,6 +175,7 @@ export default function VeloceLanding() {
             </a>
             <a
               href={PHONE_LINK}
+              data-conversion="call"
               className="sm:flex-none inline-flex items-center justify-center gap-2 bg-veloce-900/40 hover:bg-veloce-900/60 text-white border border-white/20 font-semibold px-6 py-4 rounded-xl backdrop-blur transition"
             >
               <Phone className="h-5 w-5" />
@@ -302,6 +305,7 @@ export default function VeloceLanding() {
           <div className="text-center mt-10">
             <a
               href={WHATSAPP_LINK}
+              data-conversion="whatsapp"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-veloce-600 hover:bg-veloce-700 text-white font-semibold px-8 py-4 rounded-xl shadow-md transition"
@@ -357,6 +361,7 @@ export default function VeloceLanding() {
                   <p className="text-gray-600">
                     <a
                       href={WHATSAPP_LINK}
+              data-conversion="whatsapp"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="hover:text-veloce-600"
@@ -401,6 +406,7 @@ export default function VeloceLanding() {
             <div className="space-y-3">
               <a
                 href={WHATSAPP_LINK}
+              data-conversion="whatsapp"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full inline-flex items-center justify-center gap-2 bg-veloce-600 hover:bg-veloce-700 text-white font-semibold px-6 py-4 rounded-xl shadow-md transition"
@@ -410,6 +416,7 @@ export default function VeloceLanding() {
               </a>
               <a
                 href={MAPS_LINK}
+              data-conversion="maps"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full inline-flex items-center justify-center gap-2 bg-white border border-veloce-300 text-veloce-700 hover:bg-veloce-100 font-semibold px-6 py-4 rounded-xl transition"
@@ -419,6 +426,7 @@ export default function VeloceLanding() {
               </a>
               <a
                 href={PHONE_LINK}
+              data-conversion="call"
                 className="w-full inline-flex items-center justify-center gap-2 bg-white border border-veloce-300 text-veloce-700 hover:bg-veloce-100 font-semibold px-6 py-4 rounded-xl transition"
               >
                 <Phone className="h-5 w-5" />
