@@ -10,6 +10,7 @@ import {
   Users,
   Clock,
   X,
+  Sparkles,
 } from "lucide-react"
 import { useToast } from "@/components/ui/Toast"
 
@@ -31,6 +32,16 @@ interface Campaign {
   skipped_count: number
   sent_at: string | null
   created_at: string
+  audience?: {
+    lifecycle_rule?: "winback_90d" | "overhaul_1y" | "birthday"
+    [key: string]: unknown
+  } | null
+}
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  winback_90d: "Winback 90d",
+  overhaul_1y: "Overhaul 1 año",
+  birthday: "Cumpleaños",
 }
 
 const HOT_TAGS = [
@@ -150,8 +161,14 @@ export default function MarketingClient() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <span className="font-semibold text-gray-900">{c.name}</span>
+                    {c.audience?.lifecycle_rule && (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                        <Sparkles className="h-3 w-3" />
+                        Automático · {LIFECYCLE_LABELS[c.audience.lifecycle_rule]}
+                      </span>
+                    )}
                     <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">
                       {c.mode === "template" ? "Plantilla" : "Mensaje libre"}
                     </span>

@@ -15,6 +15,7 @@ import AIGlobalPauseToggle from "@/components/settings/AIGlobalPauseToggle"
 import GoogleReviewSetting from "@/components/settings/GoogleReviewSetting"
 import PushNotificationSetting from "@/components/push/PushNotificationSetting"
 import SignatureSetting from "@/components/settings/SignatureSetting"
+import LifecycleSetting from "@/components/settings/LifecycleSetting"
 
 const settingsSections = [
   {
@@ -88,6 +89,8 @@ export default function SettingsPage() {
       <PushNotificationSetting />
 
       <SignatureSetting />
+
+      <LifecycleSetting />
 
       <GoogleReviewSetting />
 

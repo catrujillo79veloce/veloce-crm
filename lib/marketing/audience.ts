@@ -14,6 +14,10 @@ export interface AudienceFilter {
   tags?: string[] // tag names (any-of)
   source?: string // crm_contact_source
   city?: string
+  /** Pre-computed contact IDs (used by lifecycle automations & saved lists). */
+  contact_ids?: string[]
+  /** Marker so we can show an "Automático" badge in the UI. Resolver ignores. */
+  lifecycle_rule?: "winback_90d" | "overhaul_1y" | "birthday"
 }
 
 export interface AudienceContact {
@@ -26,6 +30,18 @@ export async function resolveAudience(
   supabase: AdminClient,
   filter: AudienceFilter
 ): Promise<AudienceContact[]> {
+  // Short-circuit for pre-computed audiences (lifecycle / saved lists).
+  if (filter.contact_ids && filter.contact_ids.length > 0) {
+    const { data } = await supabase
+      .from("crm_contacts")
+      .select("id, first_name, whatsapp_phone")
+      .in("id", filter.contact_ids)
+      .not("whatsapp_phone", "is", null)
+      .neq("whatsapp_phone", "")
+      .limit(2000)
+    return (data ?? []).filter((c) => c.whatsapp_phone) as AudienceContact[]
+  }
+
   // If tags are specified, start from contacts carrying any of those tags.
   let contactIdFilter: string[] | null = null
   if (filter.tags && filter.tags.length > 0) {

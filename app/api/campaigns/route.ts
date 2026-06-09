@@ -18,7 +18,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("crm_campaigns")
     .select(
-      "id, name, mode, body, template_name, template_lang, status, total_recipients, sent_count, failed_count, skipped_count, sent_at, created_at"
+      "id, name, mode, body, template_name, template_lang, status, total_recipients, sent_count, failed_count, skipped_count, sent_at, created_at, audience"
     )
     .order("created_at", { ascending: false })
 
