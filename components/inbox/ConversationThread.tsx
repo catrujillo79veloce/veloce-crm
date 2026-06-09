@@ -9,6 +9,10 @@ import {
   ExternalLink,
   Bot,
   BotOff,
+  StickyNote,
+  UserPlus,
+  Check,
+  X as XIcon,
 } from "lucide-react"
 import { cn, formatDateTime } from "@/lib/utils"
 import { Avatar, LoadingSpinner } from "@/components/ui"
@@ -16,7 +20,14 @@ import { createClient } from "@/lib/supabase/client"
 import MessageComposer from "./MessageComposer"
 import MessageMedia from "./MessageMedia"
 import ContactTagsBar from "./ContactTagsBar"
-import type { Contact, Interaction, InteractionType } from "@/lib/types"
+import { assignConversation } from "@/app/actions/conversations"
+import type { MentionablePerson } from "./MentionPicker"
+import type {
+  Contact,
+  Interaction,
+  InteractionType,
+  TeamMember,
+} from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Channel badge helper
@@ -47,6 +58,23 @@ function ChannelBadgeInline({ type }: { type: InteractionType }) {
   }
 }
 
+// Render the note body with @mentions highlighted in amber.
+function renderNoteBody(body: string) {
+  const parts = body.split(/(@[A-Za-zÀ-ÿ0-9_]+)/)
+  return parts.map((part, i) =>
+    part.startsWith("@") ? (
+      <span
+        key={i}
+        className="font-semibold text-amber-700 bg-amber-100 rounded px-0.5"
+      >
+        {part}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  )
+}
+
 // ---------------------------------------------------------------------------
 // ConversationThread
 // ---------------------------------------------------------------------------
@@ -54,29 +82,36 @@ function ChannelBadgeInline({ type }: { type: InteractionType }) {
 interface ConversationThreadProps {
   contact: Contact
   channelType: InteractionType
+  teamMembers: MentionablePerson[]
 }
 
 export default function ConversationThread({
   contact,
   channelType,
+  teamMembers,
 }: ConversationThreadProps) {
   const [messages, setMessages] = useState<Interaction[]>([])
   const [loading, setLoading] = useState(true)
   const [aiEnabled, setAiEnabled] = useState<boolean>(contact.ai_enabled ?? true)
   const [togglingAi, setTogglingAi] = useState(false)
+  const [assignedTo, setAssignedTo] = useState<string | null>(
+    contact.assigned_to ?? null
+  )
+  const [assigning, setAssigning] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Sync AI state when the selected contact changes
+  // Sync local state when the selected contact changes
   useEffect(() => {
     setAiEnabled(contact.ai_enabled ?? true)
-  }, [contact.id, contact.ai_enabled])
+    setAssignedTo(contact.assigned_to ?? null)
+  }, [contact.id, contact.ai_enabled, contact.assigned_to])
 
   // Toggle AI auto-reply for this contact
   const toggleAi = async () => {
     if (togglingAi) return
     const next = !aiEnabled
     setTogglingAi(true)
-    // Optimistic update
     setAiEnabled(next)
     try {
       const response = await fetch(`/api/contacts/${contact.id}/toggle-ai`, {
@@ -86,7 +121,6 @@ export default function ConversationThread({
       })
       const result = await response.json()
       if (!result.success) {
-        // Revert on failure
         setAiEnabled(!next)
         console.error("Toggle AI failed:", result.error)
       }
@@ -98,7 +132,30 @@ export default function ConversationThread({
     }
   }
 
-  // Load messages for this contact
+  const handleAssign = async (memberId: string | null) => {
+    if (assigning) return
+    setAssigning(true)
+    const prev = assignedTo
+    setAssignedTo(memberId)
+    setAssignOpen(false)
+    try {
+      const result = await assignConversation(contact.id, memberId)
+      if (!result.success) {
+        setAssignedTo(prev)
+        console.error("assignConversation failed:", result.error)
+      }
+    } catch (e) {
+      setAssignedTo(prev)
+      console.error("assignConversation error:", e)
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  const assignedMember =
+    teamMembers.find((m) => m.id === assignedTo) ?? null
+
+  // Load messages for this contact (channel messages + internal notes)
   useEffect(() => {
     let cancelled = false
 
@@ -119,6 +176,7 @@ export default function ConversationThread({
           "whatsapp_message",
           "facebook_message",
           "instagram_message",
+          "note",
         ])
         .order("occurred_at", { ascending: true })
         .limit(100)
@@ -146,9 +204,7 @@ export default function ConversationThread({
     }
   }, [contact.id])
 
-  // Realtime: append new messages to the OPEN conversation as they arrive.
-  // The filter scopes the subscription to this contact's rows on the server,
-  // so we don't get spammed with events from other conversations.
+  // Realtime: append new messages and internal notes
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
@@ -163,15 +219,14 @@ export default function ConversationThread({
         },
         (payload) => {
           const row = payload.new as Interaction
-          if (
-            row.type !== "whatsapp_message" &&
-            row.type !== "facebook_message" &&
-            row.type !== "instagram_message"
-          ) {
-            return
-          }
+          const ALLOWED: InteractionType[] = [
+            "whatsapp_message",
+            "facebook_message",
+            "instagram_message",
+            "note",
+          ]
+          if (!ALLOWED.includes(row.type)) return
           setMessages((prev) => {
-            // Drop optimistic temp- duplicates (same body + direction within 30s)
             const cleaned = prev.filter(
               (m) =>
                 !(
@@ -184,8 +239,6 @@ export default function ConversationThread({
                   ) < 30000
                 )
             )
-            // Skip if the real row is already present (happens when the same
-            // tab inserted it and then receives the realtime echo)
             if (cleaned.some((m) => m.id === row.id)) return cleaned
             return [...cleaned, row]
           })
@@ -203,7 +256,21 @@ export default function ConversationThread({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  // Handle new message sent
+  // Close assign popover on outside click / Escape
+  useEffect(() => {
+    if (!assignOpen) return
+    const close = () => setAssignOpen(false)
+    window.addEventListener("click", close)
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close()
+    }
+    window.addEventListener("keydown", esc)
+    return () => {
+      window.removeEventListener("click", close)
+      window.removeEventListener("keydown", esc)
+    }
+  }, [assignOpen])
+
   const handleMessageSent = (newMessage: Interaction) => {
     setMessages((prev) => [...prev, newMessage])
   }
@@ -228,11 +295,101 @@ export default function ConversationThread({
           <p className="text-xs text-gray-500 truncate">
             {contact.whatsapp_phone || contact.phone || contact.email || ""}
           </p>
-          {/* Contact tags (quick add/remove) */}
           <div className="mt-1.5">
             <ContactTagsBar contactId={contact.id} />
           </div>
         </div>
+
+        {/* Assignment picker */}
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setAssignOpen((v) => !v)}
+            disabled={assigning}
+            title={
+              assignedMember
+                ? `Asignado a ${assignedMember.full_name}`
+                : "Asignar a un miembro del equipo"
+            }
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors border",
+              assignedMember
+                ? "bg-veloce-50 text-veloce-700 border-veloce-200 hover:bg-veloce-100"
+                : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50",
+              assigning && "opacity-60 cursor-wait"
+            )}
+          >
+            {assignedMember ? (
+              <>
+                <Avatar
+                  src={assignedMember.avatar_url}
+                  firstName={assignedMember.full_name.split(" ")[0]}
+                  lastName={assignedMember.full_name.split(" ")[1] ?? ""}
+                  size="xs"
+                />
+                <span className="truncate max-w-[7rem]">
+                  {assignedMember.full_name.split(" ")[0]}
+                </span>
+              </>
+            ) : (
+              <>
+                <UserPlus className="w-3.5 h-3.5" />
+                Asignar
+              </>
+            )}
+          </button>
+
+          {assignOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                Asignar conversación
+              </div>
+              <ul className="max-h-64 overflow-y-auto py-1">
+                <li>
+                  <button
+                    onClick={() => handleAssign(null)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+                      !assignedTo
+                        ? "bg-gray-50 text-gray-700"
+                        : "hover:bg-gray-50 text-gray-600"
+                    )}
+                  >
+                    <XIcon className="w-3.5 h-3.5 text-gray-400" />
+                    Sin asignar
+                    {!assignedTo && (
+                      <Check className="w-3.5 h-3.5 ml-auto text-veloce-600" />
+                    )}
+                  </button>
+                </li>
+                {teamMembers.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      onClick={() => handleAssign(m.id)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+                        m.id === assignedTo
+                          ? "bg-veloce-50 text-veloce-800"
+                          : "hover:bg-gray-50 text-gray-700"
+                      )}
+                    >
+                      <Avatar
+                        src={m.avatar_url}
+                        firstName={m.full_name.split(" ")[0]}
+                        lastName={m.full_name.split(" ")[1] ?? ""}
+                        size="sm"
+                      />
+                      <span className="truncate">{m.full_name}</span>
+                      {m.id === assignedTo && (
+                        <Check className="w-3.5 h-3.5 ml-auto text-veloce-600" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
         {/* AI auto-reply toggle */}
         <button
           onClick={toggleAi}
@@ -283,6 +440,10 @@ export default function ConversationThread({
           </div>
         ) : (
           messages.map((msg) => {
+            if (msg.type === "note") {
+              return <InternalNoteBubble key={msg.id} note={msg} />
+            }
+
             const isOutbound = msg.direction === "outbound"
 
             return (
@@ -301,14 +462,12 @@ export default function ConversationThread({
                       : "bg-gray-100 text-gray-900 rounded-bl-md"
                   )}
                 >
-                  {/* Sender name for outbound */}
                   {isOutbound && msg.team_member && (
                     <p className="text-xs font-medium text-green-700 mb-0.5">
                       {msg.team_member.full_name}
                     </p>
                   )}
 
-                  {/* Media attachment (image / audio / video / document) */}
                   {msg.media_url && msg.media_type && (
                     <MessageMedia
                       url={msg.media_url}
@@ -320,14 +479,12 @@ export default function ConversationThread({
                     />
                   )}
 
-                  {/* Message body (caption or plain text) */}
                   {msg.body && (
                     <p className="text-sm whitespace-pre-wrap break-words">
                       {msg.body}
                     </p>
                   )}
 
-                  {/* Timestamp */}
                   <p
                     className={cn(
                       "text-[10px] mt-1",
@@ -348,8 +505,42 @@ export default function ConversationThread({
       <MessageComposer
         contact={contact}
         channelType={channelType}
+        teamMembers={teamMembers}
         onMessageSent={handleMessageSent}
       />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sticky-note bubble for internal notes
+// ---------------------------------------------------------------------------
+
+function InternalNoteBubble({ note }: { note: Interaction }) {
+  const author = (note as Interaction & { team_member?: TeamMember }).team_member
+  return (
+    <div className="flex justify-center">
+      <div className="max-w-[85%] rounded-xl px-3.5 py-2 bg-amber-50 border border-amber-200 shadow-sm">
+        <div className="flex items-center gap-1.5 mb-1">
+          <StickyNote className="w-3.5 h-3.5 text-amber-600" />
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+            Nota interna
+          </span>
+          {author && (
+            <span className="text-[11px] text-amber-700/80">
+              · {author.full_name}
+            </span>
+          )}
+        </div>
+        {note.body && (
+          <p className="text-sm whitespace-pre-wrap break-words text-amber-900">
+            {renderNoteBody(note.body)}
+          </p>
+        )}
+        <p className="text-[10px] mt-1 text-amber-600/70">
+          {formatDateTime(note.occurred_at)}
+        </p>
+      </div>
     </div>
   )
 }

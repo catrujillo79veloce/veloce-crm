@@ -9,6 +9,7 @@ import ConversationList from "./ConversationList"
 import ConversationThread from "./ConversationThread"
 import type { ConversationSummary } from "@/app/(crm)/inbox/page"
 import type { Contact, Interaction, InteractionType } from "@/lib/types"
+import type { MentionablePerson } from "./MentionPicker"
 
 type ChannelFilter = "all" | "whatsapp_message" | "facebook_message" | "instagram_message"
 
@@ -27,6 +28,7 @@ const MESSAGE_TYPES: InteractionType[] = [
 
 interface InboxViewProps {
   initialConversations: ConversationSummary[]
+  teamMembers: MentionablePerson[]
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +76,10 @@ function playPing() {
 // InboxView
 // ---------------------------------------------------------------------------
 
-export default function InboxView({ initialConversations }: InboxViewProps) {
+export default function InboxView({
+  initialConversations,
+  teamMembers,
+}: InboxViewProps) {
   const [conversations, setConversations] = useState(initialConversations)
   const [selectedContactId, setSelectedContactId] = useState<string | null>(
     initialConversations[0]?.contact.id ?? null
@@ -143,7 +148,7 @@ export default function InboxView({ initialConversations }: InboxViewProps) {
               const { data: contact } = await supabase
                 .from("crm_contacts")
                 .select(
-                  "id, first_name, last_name, email, phone, whatsapp_phone, facebook_id, instagram_id, source, avatar_url, status, ai_enabled, ai_paused_at"
+                  "id, first_name, last_name, email, phone, whatsapp_phone, facebook_id, instagram_id, source, avatar_url, status, ai_enabled, ai_paused_at, assigned_to"
                 )
                 .eq("id", row.contact_id)
                 .single()
@@ -265,6 +270,7 @@ export default function InboxView({ initialConversations }: InboxViewProps) {
             <ConversationList
               conversations={filteredConversations}
               selectedContactId={selectedContactId}
+              teamMembers={teamMembers}
               onSelect={handleSelectConversation}
             />
           </div>
@@ -291,6 +297,7 @@ export default function InboxView({ initialConversations }: InboxViewProps) {
                   <ConversationThread
                     contact={selectedConversation.contact}
                     channelType={selectedConversation.lastInteraction.type}
+                    teamMembers={teamMembers}
                   />
                 </div>
               </>

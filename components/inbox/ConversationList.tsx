@@ -5,6 +5,7 @@ import { cn, truncate, formatRelativeTime } from "@/lib/utils"
 import { Avatar } from "@/components/ui"
 import type { ConversationSummary } from "@/app/(crm)/inbox/page"
 import type { Interaction, InteractionType } from "@/lib/types"
+import type { MentionablePerson } from "./MentionPicker"
 
 // Build a preview string for the conversation list, handling media-only msgs.
 function previewFor(interaction: Interaction): string {
@@ -51,14 +52,17 @@ function ChannelIcon({ type, className }: { type: InteractionType; className?: s
 interface ConversationListProps {
   conversations: ConversationSummary[]
   selectedContactId: string | null
+  teamMembers: MentionablePerson[]
   onSelect: (contactId: string) => void
 }
 
 export default function ConversationList({
   conversations,
   selectedContactId,
+  teamMembers,
   onSelect,
 }: ConversationListProps) {
+  const memberById = new Map(teamMembers.map((m) => [m.id, m]))
   return (
     <div className="flex-1 overflow-y-auto">
       {conversations.map((conv) => {
@@ -77,14 +81,32 @@ export default function ConversationList({
                 : "hover:bg-gray-50",
             )}
           >
-            {/* Avatar */}
-            <Avatar
-              src={contact.avatar_url}
-              firstName={contact.first_name}
-              lastName={contact.last_name}
-              size="md"
-              className="flex-shrink-0 mt-0.5"
-            />
+            {/* Avatar with assignee dot */}
+            <div className="relative flex-shrink-0 mt-0.5">
+              <Avatar
+                src={contact.avatar_url}
+                firstName={contact.first_name}
+                lastName={contact.last_name}
+                size="md"
+              />
+              {contact.assigned_to && memberById.get(contact.assigned_to) && (
+                <div
+                  className="absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-white"
+                  title={`Asignado a ${memberById.get(contact.assigned_to)!.full_name}`}
+                >
+                  <Avatar
+                    src={memberById.get(contact.assigned_to)!.avatar_url}
+                    firstName={
+                      memberById.get(contact.assigned_to)!.full_name.split(" ")[0]
+                    }
+                    lastName={
+                      memberById.get(contact.assigned_to)!.full_name.split(" ")[1] ?? ""
+                    }
+                    size="xs"
+                  />
+                </div>
+              )}
+            </div>
 
             {/* Content */}
             <div className="flex-1 min-w-0">

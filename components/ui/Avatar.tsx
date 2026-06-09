@@ -2,6 +2,7 @@ import React from "react"
 import { cn, getInitials } from "@/lib/utils"
 
 const sizeStyles = {
+  xs: "h-5 w-5 text-[9px]",
   sm: "h-8 w-8 text-xs",
   md: "h-10 w-10 text-sm",
   lg: "h-14 w-14 text-lg",
