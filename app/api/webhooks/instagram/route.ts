@@ -136,6 +136,10 @@ async function processInstagramMessages(body: any) {
             last_name: `User ${msg.senderId.slice(-6)}`,
             instagram_id: msg.senderId,
             source: "instagram",
+            source_detail: msg.referral
+              ? `Pauta: ${msg.referral.headline ?? msg.referral.source_id ?? "Click-to-Instagram"}`
+              : null,
+            utm_source: msg.referral ? "meta_ctd" : null,
             city: "Medellin",
             status: "active",
             interests: [],
@@ -202,6 +206,7 @@ async function processInstagramMessages(body: any) {
           channel_metadata: {
             sender_id: msg.senderId,
             timestamp: msg.timestamp,
+            ...(msg.referral ? { referral: msg.referral } : {}),
           },
           media_url: mediaUrl,
           media_type: mediaType,

@@ -13,6 +13,7 @@ import {
   UserPlus,
   Check,
   X as XIcon,
+  Megaphone,
 } from "lucide-react"
 import { cn, formatDateTime } from "@/lib/utils"
 import { Avatar, LoadingSpinner } from "@/components/ui"
@@ -56,6 +57,24 @@ function ChannelBadgeInline({ type }: { type: InteractionType }) {
     default:
       return null
   }
+}
+
+// Ad attribution stored by the webhooks when the user arrives from a paid
+// ad (Click-to-WhatsApp / Messenger / Instagram-Direct).
+interface AdReferral {
+  source_type?: string
+  source_url?: string
+  headline?: string
+  body?: string
+  image_url?: string
+  thumbnail_url?: string
+}
+
+function getReferral(msg: Interaction): AdReferral | null {
+  const meta = msg.channel_metadata as Record<string, unknown> | null
+  const r = meta?.referral
+  if (!r || typeof r !== "object") return null
+  return r as AdReferral
 }
 
 // Render the note body with @mentions highlighted in amber.
@@ -445,6 +464,7 @@ export default function ConversationThread({
             }
 
             const isOutbound = msg.direction === "outbound"
+            const referral = !isOutbound ? getReferral(msg) : null
 
             return (
               <div
@@ -466,6 +486,46 @@ export default function ConversationThread({
                     <p className="text-xs font-medium text-green-700 mb-0.5">
                       {msg.team_member.full_name}
                     </p>
+                  )}
+
+                  {/* Ad attribution banner — which pauta brought them in */}
+                  {referral && (
+                    <div className="mb-2 -mx-1 flex items-start gap-2 rounded-lg bg-violet-50 border border-violet-200 px-2.5 py-1.5">
+                      {(referral.thumbnail_url || referral.image_url) && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={referral.thumbnail_url || referral.image_url}
+                          alt="Anuncio"
+                          className="w-9 h-9 rounded object-cover flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-violet-700 flex items-center gap-1">
+                          <Megaphone className="w-3 h-3 flex-shrink-0" />
+                          Llegó desde la pauta
+                        </p>
+                        {referral.headline && (
+                          <p className="text-xs text-violet-900 truncate">
+                            {referral.headline}
+                          </p>
+                        )}
+                        {referral.body && (
+                          <p className="text-[11px] text-violet-700/80 line-clamp-2">
+                            {referral.body}
+                          </p>
+                        )}
+                        {referral.source_url && (
+                          <a
+                            href={referral.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-violet-600 underline hover:text-violet-800"
+                          >
+                            Ver anuncio
+                          </a>
+                        )}
+                      </div>
+                    </div>
                   )}
 
                   {msg.media_url && msg.media_type && (

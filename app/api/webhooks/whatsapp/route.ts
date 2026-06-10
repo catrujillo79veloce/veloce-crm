@@ -125,6 +125,11 @@ async function processAndReply(body: any) {
             whatsapp_phone: normalizedPhone,
             phone: normalizedPhone,
             source: "whatsapp",
+            // Attribution: which ad brought this person in
+            source_detail: msg.referral
+              ? `Pauta: ${msg.referral.headline ?? msg.referral.source_url ?? msg.referral.source_id ?? "Click-to-WhatsApp"}`
+              : null,
+            utm_source: msg.referral ? "meta_ctwa" : null,
             city: "Medellin",
             status: "active",
             interests: [],
@@ -198,6 +203,7 @@ async function processAndReply(body: any) {
         channel_metadata: {
           phone: msg.phone,
           sender_name: msg.senderName ?? null,
+          ...(msg.referral ? { referral: msg.referral } : {}),
         },
         media_url: mediaUrl,
         media_type: mediaType,
@@ -213,6 +219,10 @@ async function processAndReply(body: any) {
       // --- HOT ALERT: notify admin if message shows buying intent ---
       const detection = detectHotMessage(msg.message)
       const contactName = msg.senderName ?? normalizedPhone
+      // Surface the originating ad in admin notifications
+      const messageForAlerts = msg.referral
+        ? `${msg.message}\n📣 Viene de la pauta: ${msg.referral.headline ?? "Click-to-WhatsApp"}`
+        : msg.message
       const isAdminSelf = ADMIN_PHONE === normalizedPhone.replace(/\+/g, "")
       let hotPingFired = false
       if (detection.isHot && !isAdminSelf) {
@@ -222,7 +232,7 @@ async function processAndReply(body: any) {
           contactName,
           contactId,
           channel: "whatsapp",
-          message: msg.message,
+          message: messageForAlerts,
           detection,
         }).catch((e) => console.error("[WhatsApp] Hot alert failed:", e))
       }
@@ -234,7 +244,7 @@ async function processAndReply(body: any) {
           contactId,
           contactName,
           channel: "whatsapp",
-          message: msg.message,
+          message: messageForAlerts,
           skip: hotPingFired, // hot alert already covers this message
         }).catch((e) => console.error("[WhatsApp] Notify admin failed:", e))
       }
@@ -290,7 +300,17 @@ async function processAndReply(body: any) {
         // Nothing the bot can respond to — skip silently
         continue
       }
-      const aiResponse = await generateAgentResponse(promptForAI, conversationHistory)
+      // If the user came from an ad, tell the bot which one so a bare
+      // "info" / "precio?" can be answered in context.
+      const adContext = msg.referral
+        ? `[Contexto: el cliente llegó desde la pauta "${
+            msg.referral.headline ?? "Click-to-WhatsApp"
+          }"${msg.referral.body ? ` — texto del anuncio: "${msg.referral.body}"` : ""}. Si pregunta algo genérico como "info" o "precio", se refiere a lo que ofrece ese anuncio.]\n\n`
+        : ""
+      const aiResponse = await generateAgentResponse(
+        adContext + promptForAI,
+        conversationHistory
+      )
 
       // --- Send reply via WhatsApp API ---
       const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)

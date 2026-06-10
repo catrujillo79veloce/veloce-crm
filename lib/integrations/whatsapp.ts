@@ -233,6 +233,23 @@ export type WhatsAppMediaKind =
   | "document"
   | "sticker"
 
+/**
+ * Ad attribution attached by Meta when the user taps a Click-to-WhatsApp ad
+ * (or an FB post with a "Send message" CTA) and lands in this conversation.
+ */
+export interface MessageReferral {
+  source_type: string // "ad" | "post"
+  source_id?: string
+  source_url?: string
+  headline?: string
+  body?: string
+  media_type?: string // "image" | "video"
+  image_url?: string
+  video_url?: string
+  thumbnail_url?: string
+  ctwa_clid?: string
+}
+
 export interface ParsedWhatsAppMessage {
   phone: string
   /** Text body, or empty string if the message is media-only. */
@@ -249,6 +266,8 @@ export interface ParsedWhatsAppMessage {
     mime: string
     filename?: string
   }
+  /** Present when the user arrived from a Click-to-WhatsApp ad. */
+  referral?: MessageReferral
 }
 
 export function parseWhatsAppWebhook(
@@ -298,6 +317,7 @@ export function parseWhatsAppWebhook(
             timestamp: msg.timestamp,
             senderName: contactMap.get(msg.from),
             media,
+            referral: extractReferral(msg),
           })
         }
       }
@@ -307,6 +327,27 @@ export function parseWhatsAppWebhook(
   }
 
   return messages
+}
+
+// Ad attribution (Click-to-WhatsApp). Only keep the fields we use; never
+// fail the parse because of an unexpected referral shape.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractReferral(msg: any): MessageReferral | undefined {
+  const r = msg?.referral
+  if (!r || typeof r !== "object") return undefined
+  const referral: MessageReferral = {
+    source_type: typeof r.source_type === "string" ? r.source_type : "ad",
+  }
+  if (typeof r.source_id === "string") referral.source_id = r.source_id
+  if (typeof r.source_url === "string") referral.source_url = r.source_url
+  if (typeof r.headline === "string") referral.headline = r.headline
+  if (typeof r.body === "string") referral.body = r.body
+  if (typeof r.media_type === "string") referral.media_type = r.media_type
+  if (typeof r.image_url === "string") referral.image_url = r.image_url
+  if (typeof r.video_url === "string") referral.video_url = r.video_url
+  if (typeof r.thumbnail_url === "string") referral.thumbnail_url = r.thumbnail_url
+  if (typeof r.ctwa_clid === "string") referral.ctwa_clid = r.ctwa_clid
+  return referral
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

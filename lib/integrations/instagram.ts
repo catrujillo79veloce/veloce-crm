@@ -158,6 +158,45 @@ function parseInstagramError(
 
 export type IGMediaKind = "image" | "audio" | "video" | "document" | "sticker"
 
+/**
+ * Ad attribution for Messenger-platform channels (IG / FB). Normalized to the
+ * same shape used by the WhatsApp parser so the UI can render one banner.
+ */
+export interface MessengerReferral {
+  source_type: string // "ad" | "post" | "ref"
+  source_id?: string // ad_id
+  source_url?: string
+  headline?: string // ads_context_data.ad_title
+  body?: string
+  image_url?: string // ads_context_data.photo_url
+  video_url?: string
+  ref?: string
+}
+
+/**
+ * Extract + normalize the referral object from a Messenger-platform webhook
+ * event. It can ride on the message (CTM/CTD ads opening a new thread), on a
+ * postback, or as a standalone messaging_referrals event.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeMessengerReferral(event: any): MessengerReferral | undefined {
+  const r = event?.message?.referral ?? event?.postback?.referral ?? event?.referral
+  if (!r || typeof r !== "object") return undefined
+  const ads = r.ads_context_data ?? {}
+  const referral: MessengerReferral = {
+    source_type:
+      typeof r.source === "string" ? r.source.toLowerCase() : "ad",
+  }
+  if (typeof r.ad_id === "string") referral.source_id = r.ad_id
+  if (typeof r.ref === "string") referral.ref = r.ref
+  if (typeof ads.ad_title === "string") referral.headline = ads.ad_title
+  if (typeof ads.photo_url === "string") referral.image_url = ads.photo_url
+  if (typeof ads.video_url === "string") referral.video_url = ads.video_url
+  // Nothing useful extracted → treat as absent
+  if (!referral.source_id && !referral.headline && !referral.ref) return undefined
+  return referral
+}
+
 export interface ParsedInstagramMessage {
   senderId: string
   /** Text body, or empty when the message is media-only. */
@@ -171,6 +210,8 @@ export interface ParsedInstagramMessage {
     /** IG/FB don't send mime — we infer from URL or default to a sensible guess. */
     mime: string
   }
+  /** Present when the user arrived from a Click-to-Instagram-Direct ad. */
+  referral?: MessengerReferral
 }
 
 export function parseInstagramWebhook(
@@ -203,6 +244,7 @@ export function parseInstagramWebhook(
           messageId: event.message.mid ?? "",
           timestamp: event.timestamp ?? Date.now(),
           media,
+          referral: normalizeMessengerReferral(event),
         })
       }
     }

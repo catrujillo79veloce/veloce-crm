@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
 import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
-import { extractFirstAttachment } from "@/lib/integrations/instagram"
+import {
+  extractFirstAttachment,
+  normalizeMessengerReferral,
+} from "@/lib/integrations/instagram"
 import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
@@ -103,6 +106,7 @@ async function processMessengerMessages(body: any) {
         const text: string = event.message.text ?? ""
         const attachments = event.message.attachments ?? []
         const media = extractFirstAttachment(attachments)
+        const referral = normalizeMessengerReferral(event)
 
         // Need at least text or media to proceed
         if (!text && !media) continue
@@ -148,7 +152,10 @@ async function processMessengerMessages(body: any) {
               last_name: `User ${senderId.slice(-6)}`,
               facebook_id: senderId,
               source: "facebook_lead_ads",
-              source_detail: "messenger",
+              source_detail: referral
+                ? `Pauta: ${referral.headline ?? referral.source_id ?? "Click-to-Messenger"}`
+                : "messenger",
+              utm_source: referral ? "meta_ctm" : null,
               city: "Medellin",
               status: "active",
               interests: [],
@@ -209,7 +216,11 @@ async function processMessengerMessages(body: any) {
           direction: "inbound",
           body: text,
           channel_message_id: messageId,
-          channel_metadata: { sender_id: senderId, timestamp },
+          channel_metadata: {
+            sender_id: senderId,
+            timestamp,
+            ...(referral ? { referral } : {}),
+          },
           media_url: mediaUrl,
           media_type: mediaType,
           media_mime: mediaMime,
