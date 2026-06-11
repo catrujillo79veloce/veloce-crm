@@ -118,15 +118,23 @@ async function processInstagramMessages(body: any) {
 
       const { data: existingContact } = await supabase
         .from("crm_contacts")
-        .select("id")
+        .select("id, utm_source")
         .eq("instagram_id", msg.senderId)
         .limit(1)
 
       if (existingContact && existingContact.length > 0) {
         contactId = existingContact[0].id
+        const contactUpdate: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        }
+        // Late attribution: the contact existed before clicking the ad
+        if (msg.referral && !existingContact[0].utm_source) {
+          contactUpdate.source_detail = `Pauta: ${msg.referral.headline ?? msg.referral.source_id ?? "Click-to-Instagram"}`
+          contactUpdate.utm_source = "meta_ctd"
+        }
         await supabase
           .from("crm_contacts")
-          .update({ updated_at: new Date().toISOString() })
+          .update(contactUpdate)
           .eq("id", contactId)
       } else {
         const { data: newContact, error: contactError } = await supabase
@@ -223,6 +231,10 @@ async function processInstagramMessages(body: any) {
 
       console.log("[Instagram] Inbound saved for:", contactId)
 
+      // Referral-only event (ad click, no text/media): the pauta is already
+      // attached to the contact + thread — nothing for alerts or the bot to do.
+      if (!msg.message && !msg.media) continue
+
       // --- HOT ALERT ---
       const detection = detectHotMessage(msg.message)
       const contactName = `Instagram User ${msg.senderId.slice(-6)}`
@@ -297,7 +309,17 @@ async function processInstagramMessages(body: any) {
         // Media we couldn't process and no text — skip the bot silently
         continue
       }
-      const aiResponse = await generateAgentResponse(promptForAI, conversationHistory)
+      // If the user came from an ad, tell the bot which one so a bare
+      // "info" / "precio?" can be answered in context (parity with WhatsApp).
+      const adContext = msg.referral
+        ? `[Contexto: el cliente llegó desde la pauta "${
+            msg.referral.headline ?? "Click-to-Instagram"
+          }"${msg.referral.body ? ` — texto del anuncio: "${msg.referral.body}"` : ""}. Si pregunta algo genérico como "info" o "precio", se refiere a lo que ofrece ese anuncio.]\n\n`
+        : ""
+      const aiResponse = await generateAgentResponse(
+        adContext + promptForAI,
+        conversationHistory
+      )
 
       // --- Send reply via Instagram API ---
       const sent = await sendInstagramMessage(msg.senderId, aiResponse)

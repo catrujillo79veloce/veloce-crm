@@ -99,21 +99,25 @@ async function processMessengerMessages(body: any) {
 
     for (const event of messagingEvents) {
       try {
-        // Only process incoming messages
-        if (!event.message) continue
-        if (event.message.is_echo) continue
+        // Skip echo messages (sent by the page itself)
+        if (event.message?.is_echo) continue
 
-        const text: string = event.message.text ?? ""
-        const attachments = event.message.attachments ?? []
+        const text: string = event.message?.text ?? ""
+        const attachments = event.message?.attachments ?? []
         const media = extractFirstAttachment(attachments)
+        // The referral can ride on the message (CTM ad opening a new thread)
+        // or arrive as a standalone messaging_referrals / postback event when
+        // the user clicks an ad into an existing thread (no message attached).
         const referral = normalizeMessengerReferral(event)
 
-        // Need at least text or media to proceed
-        if (!text && !media) continue
+        // Need at least text, media, or an ad referral to proceed
+        if (!text && !media && !referral) continue
 
         const senderId: string = event.sender?.id ?? ""
-        const messageId: string = event.message.mid ?? ""
         const timestamp: number = event.timestamp ?? Date.now()
+        // Standalone referral events have no mid — synthesize a stable id for dedup
+        const messageId: string =
+          event.message?.mid ?? `fbref-${senderId}-${timestamp}`
 
         if (!senderId || !messageId) continue
 
@@ -134,15 +138,23 @@ async function processMessengerMessages(body: any) {
 
         const { data: existingContact } = await supabase
           .from("crm_contacts")
-          .select("id")
+          .select("id, utm_source")
           .eq("facebook_id", senderId)
           .limit(1)
 
         if (existingContact && existingContact.length > 0) {
           contactId = existingContact[0].id
+          const contactUpdate: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+          }
+          // Late attribution: the contact existed before clicking the ad
+          if (referral && !existingContact[0].utm_source) {
+            contactUpdate.source_detail = `Pauta: ${referral.headline ?? referral.source_id ?? "Click-to-Messenger"}`
+            contactUpdate.utm_source = "meta_ctm"
+          }
           await supabase
             .from("crm_contacts")
-            .update({ updated_at: new Date().toISOString() })
+            .update(contactUpdate)
             .eq("id", contactId)
         } else {
           const { data: newContact, error: contactError } = await supabase
@@ -229,6 +241,10 @@ async function processMessengerMessages(body: any) {
           occurred_at: new Date(timestamp).toISOString(),
         })
 
+        // Referral-only event (ad click, no text/media): the pauta is already
+        // attached to the contact + thread — nothing for alerts or the bot to do.
+        if (!text && !media) continue
+
         // --- HOT ALERT ---
         const detection = detectHotMessage(text)
         const contactName = `Facebook User ${senderId.slice(-6)}`
@@ -308,8 +324,15 @@ async function processMessengerMessages(body: any) {
         if (!promptForAI) {
           continue
         }
+        // If the user came from an ad, tell the bot which one so a bare
+        // "info" / "precio?" can be answered in context (parity with WhatsApp).
+        const adContext = referral
+          ? `[Contexto: el cliente llegó desde la pauta "${
+              referral.headline ?? "Click-to-Messenger"
+            }"${referral.body ? ` — texto del anuncio: "${referral.body}"` : ""}. Si pregunta algo genérico como "info" o "precio", se refiere a lo que ofrece ese anuncio.]\n\n`
+          : ""
         const aiResponse = await generateAgentResponse(
-          promptForAI,
+          adContext + promptForAI,
           conversationHistory
         )
 

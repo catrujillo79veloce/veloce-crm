@@ -226,8 +226,24 @@ export function parseInstagramWebhook(
       const messagingEvents = entry?.messaging ?? []
 
       for (const event of messagingEvents) {
-        // Only process messages (not reads, deliveries, etc.)
-        if (!event.message) continue
+        // Standalone referral/postback events (messaging_referral webhook):
+        // the user clicked an ad into an existing thread, so the referral
+        // arrives WITHOUT a message. Emit a referral-only entry so the route
+        // can attach the pauta to the contact + conversation.
+        if (!event.message) {
+          const referral = normalizeMessengerReferral(event)
+          if (!referral) continue // reads, reactions, deliveries, etc.
+          const senderId = event.sender?.id ?? ""
+          if (!senderId) continue
+          messages.push({
+            senderId,
+            message: "",
+            messageId: `igref-${senderId}-${event.timestamp ?? 0}`,
+            timestamp: event.timestamp ?? Date.now(),
+            referral,
+          })
+          continue
+        }
 
         // Skip echo messages (messages sent by the page itself)
         if (event.message.is_echo) continue
