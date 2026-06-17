@@ -41,8 +41,11 @@ export async function captionImage(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 200,
+      // Short caption, latency-sensitive — keep effort low (4.6 defaults to high).
+      thinking: { type: "disabled" },
+      output_config: { effort: "low" },
       system: SYSTEM,
       messages: [
         {

@@ -117,8 +117,12 @@ export async function generateAgentResponse(
       : VELOCE_SYSTEM_PROMPT
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 400,
+      // Fast-chat config: Sonnet 4.6 defaults to effort "high" (slower + pricier).
+      // For short WhatsApp/IG sales replies we want snappy, cheap responses.
+      thinking: { type: "disabled" },
+      output_config: { effort: "low" },
       system: systemPrompt,
       messages,
     })
