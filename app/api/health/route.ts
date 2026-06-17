@@ -1,11 +1,45 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
+import { createServerSupabaseClient } from "@/lib/supabase/server"
+import { CHAT_MODEL } from "@/lib/ai/models"
 
-export const dynamic = 'force-dynamic'
+export const dynamic = "force-dynamic"
 
-export async function GET() {
+// Authorize either a logged-in CRM team member (browser) or a Bearer token
+// matching CRON_SECRET (programmatic/monitoring). This route runs live, paid
+// API calls and reports credential status, so it must NOT be public.
+async function isAuthorized(request: NextRequest): Promise<boolean> {
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret) {
+    const auth = request.headers.get("authorization")
+    if (auth === `Bearer ${cronSecret}`) return true
+  }
+
+  try {
+    const supabase = createServerSupabaseClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return false
+    const { data: member } = await supabase
+      .from("crm_team_members")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .eq("is_active", true)
+      .single()
+    return !!member
+  } catch {
+    return false
+  }
+}
+
+export async function GET(request: NextRequest) {
+  if (!(await isAuthorized(request))) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 })
+  }
+
   const checks: Record<string, string> = {}
 
-  // Check env vars exist (don't reveal values)
+  // Env var PRESENCE only — never echo any portion of a secret value.
   const vars = [
     "WHATSAPP_PHONE_NUMBER_ID",
     "WHATSAPP_ACCESS_TOKEN",
@@ -21,31 +55,27 @@ export async function GET() {
     "INSTAGRAM_APP_SECRET",
     "INSTAGRAM_VERIFY_TOKEN",
   ]
-
   for (const v of vars) {
-    const val = process.env[v]
-    if (!val) {
-      checks[v] = "MISSING"
-    } else {
-      checks[v] = `OK (${val.substring(0, 15)}...${val.substring(val.length - 6)})`
-    }
+    checks[v] = process.env[v] ? "OK" : "MISSING"
   }
 
-  // Test Anthropic
+  // Live Anthropic test against the SAME model production uses (so a retired
+  // model id is caught here before customers hit the failure).
+  checks["ANTHROPIC_MODEL"] = CHAT_MODEL
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk")
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const msg = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: CHAT_MODEL,
       max_tokens: 20,
       messages: [{ role: "user", content: "di hola" }],
     })
-    checks["ANTHROPIC_TEST"] = `OK: ${msg.content[0].type === "text" ? msg.content[0].text : "no text"}`
+    checks["ANTHROPIC_TEST"] = msg.content[0]?.type === "text" ? "OK" : "OK (no text)"
   } catch (e: unknown) {
     checks["ANTHROPIC_TEST"] = `FAIL: ${e instanceof Error ? e.message : String(e)}`
   }
 
-  // Test WhatsApp send (dry run - just check we can hit the API)
+  // Live WhatsApp Graph reachability (status only — no raw payload echoed).
   try {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
     const token = process.env.WHATSAPP_ACCESS_TOKEN
@@ -53,10 +83,7 @@ export async function GET() {
       `https://graph.facebook.com/v25.0/${phoneNumberId}?fields=display_phone_number,status`,
       { headers: { Authorization: `Bearer ${token}` } }
     )
-    const data = await res.json()
-    checks["WHATSAPP_TEST"] = res.ok
-      ? `OK: ${JSON.stringify(data)}`
-      : `FAIL: ${JSON.stringify(data)}`
+    checks["WHATSAPP_TEST"] = res.ok ? "OK" : `FAIL: HTTP ${res.status}`
   } catch (e: unknown) {
     checks["WHATSAPP_TEST"] = `FAIL: ${e instanceof Error ? e.message : String(e)}`
   }

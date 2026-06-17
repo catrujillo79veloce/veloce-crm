@@ -110,3 +110,54 @@ export async function notifyAdminOfNewMessage(
   console.log(`[NotifyAdmin] Pinged admin about ${contactName} (${channel})`)
   return true
 }
+
+// ---------------------------------------------------------------------------
+// System-failure alert (NOT per-contact): fires when something is broken that
+// would otherwise fail silently — the AI bot erroring, a Meta send token
+// expiring, etc. This is the missing piece that let the bot stay down for 2
+// days unnoticed. Debounced in-memory per failure-kind so an outage pings
+// once every few minutes instead of on every message.
+// ---------------------------------------------------------------------------
+
+const FAILURE_DEBOUNCE_MINUTES = 10
+const lastFailureAlertAt = new Map<string, number>()
+
+/**
+ * Alert the operator that a system component is failing. Best-effort across two
+ * channels (WhatsApp + push) so a single dead channel doesn't hide the outage.
+ * `kind` is a short, stable label used for debouncing (e.g. "Bot de IA caído").
+ */
+export async function alertAdminSystemFailure(
+  kind: string,
+  detail: string
+): Promise<void> {
+  const now = Date.now()
+  const last = lastFailureAlertAt.get(kind) ?? 0
+  if (now - last < FAILURE_DEBOUNCE_MINUTES * 60 * 1000) return
+  lastFailureAlertAt.set(kind, now)
+
+  const alert = `🚨 *Falla del CRM Veloce*
+
+⚠️ *${kind}*
+${detail}
+
+🔗 ${CRM_BASE_URL}/inbox`
+
+  // Push to team devices (independent channel, best-effort)
+  sendPush({
+    title: `🚨 ${kind}`,
+    body: detail.slice(0, 180),
+    url: "/inbox",
+    tag: `sysfail-${kind}`,
+  }).catch((e) => console.error("[AlertAdmin] Push failed:", e))
+
+  // WhatsApp ping to the admin (independent of Anthropic / the broken channel)
+  try {
+    const result = await sendWhatsAppMessage(ADMIN_PHONE, alert)
+    if (!result.ok) {
+      console.error(`[AlertAdmin] WhatsApp ping failed for "${kind}":`, result.error)
+    }
+  } catch (e) {
+    console.error(`[AlertAdmin] WhatsApp ping threw for "${kind}":`, e)
+  }
+}

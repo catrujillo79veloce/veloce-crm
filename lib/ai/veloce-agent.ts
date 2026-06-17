@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { getCatalogBlock } from "./catalog-context"
+import { CHAT_MODEL } from "./models"
 
 const VELOCE_SYSTEM_PROMPT = `Eres el asistente virtual de Veloce, una tienda de bicicletas premium ubicada en Medellin, Colombia. Eres amigable, experto en ciclismo, y tu objetivo es VENDER. Manejas objeciones con habilidad y siempre buscas cerrar la venta o agendar una visita a la tienda.
 
@@ -98,10 +99,17 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
+/**
+ * Generate a sales-bot reply. Returns the reply text on success, or `null` when
+ * the Anthropic call fails (retired model, bad key, rate limit, outage). The
+ * caller MUST treat null as a failure — alert an operator and skip the reply —
+ * rather than sending a canned "technical difficulties" message that hides the
+ * outage (that silent fallback is what kept the bot down for 2 days unnoticed).
+ */
 export async function generateAgentResponse(
   userMessage: string,
   conversationHistory: { role: "user" | "assistant"; content: string }[] = []
-): Promise<string> {
+): Promise<string | null> {
   try {
     // Build messages with conversation history (last 10 messages for context)
     const recentHistory = conversationHistory.slice(-10)
@@ -117,7 +125,7 @@ export async function generateAgentResponse(
       : VELOCE_SYSTEM_PROMPT
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+      model: CHAT_MODEL,
       max_tokens: 400,
       // Fast-chat config: Sonnet 4.6 defaults to effort "high" (slower + pricier).
       // For short WhatsApp/IG sales replies we want snappy, cheap responses.
@@ -130,7 +138,9 @@ export async function generateAgentResponse(
     const textBlock = response.content.find((block) => block.type === "text")
     return textBlock?.text ?? "Hola! Soy el asistente de Veloce. En que te puedo ayudar?"
   } catch (error) {
+    // Signal failure to the caller (which alerts an operator) instead of
+    // silently returning a customer-facing "technical difficulties" string.
     console.error("[AI Agent] Error generating response:", error)
-    return "Hola! Gracias por escribirnos. En este momento estamos teniendo dificultades tecnicas. Por favor llamanos al 305 245 1204 y con gusto te atendemos. 🚴"
+    return null
   }
 }

@@ -52,3 +52,22 @@ export function verifyWebhookSignature(
     return false
   }
 }
+
+/**
+ * Verify the webhook signature against several candidate app secrets, passing
+ * if ANY of them matches. Used by the Instagram handler: the same Meta app
+ * owns the FB + IG products, so the real app secret is one value, but it may
+ * live under either INSTAGRAM_APP_SECRET or FACEBOOK_APP_SECRET (the former was
+ * historically misconfigured). Trying both lets us enforce signatures without
+ * risking rejection of legitimate traffic over an env-var mixup. Empty/missing
+ * secrets are ignored; returns false if none of the configured secrets match.
+ */
+export function verifyWebhookSignatureAny(
+  payload: string,
+  signature: string,
+  appSecrets: (string | undefined)[]
+): boolean {
+  return appSecrets.some(
+    (secret) => !!secret && verifyWebhookSignature(payload, signature, secret)
+  )
+}

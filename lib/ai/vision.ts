@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import Anthropic from "@anthropic-ai/sdk"
+import { VISION_MODEL } from "./models"
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -41,7 +42,7 @@ export async function captionImage(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+      model: VISION_MODEL,
       max_tokens: 200,
       // Short caption, latency-sensitive — keep effort low (4.6 defaults to high).
       thinking: { type: "disabled" },

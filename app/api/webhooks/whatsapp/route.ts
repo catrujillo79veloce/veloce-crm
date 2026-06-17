@@ -5,7 +5,7 @@ import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/wh
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
-import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { notifyAdminOfNewMessage, alertAdminSystemFailure } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
 import {
   downloadAndStore,
@@ -194,25 +194,33 @@ async function processAndReply(body: any) {
         }
       }
 
-      await supabase.from("crm_interactions").insert({
-        contact_id: contactId,
-        type: "whatsapp_message",
-        direction: "inbound",
-        body: msg.message || msg.caption || "",
-        channel_message_id: msg.messageId,
-        channel_metadata: {
-          phone: msg.phone,
-          sender_name: msg.senderName ?? null,
-          ...(msg.referral ? { referral: msg.referral } : {}),
-        },
-        media_url: mediaUrl,
-        media_type: mediaType,
-        media_mime: mediaMime,
-        media_caption: msg.caption ?? null,
-        transcription,
-        vision_caption: visionCaption,
-        occurred_at: occurredAt,
-      })
+      const { error: inboundInsertError } = await supabase
+        .from("crm_interactions")
+        .insert({
+          contact_id: contactId,
+          type: "whatsapp_message",
+          direction: "inbound",
+          body: msg.message || msg.caption || "",
+          channel_message_id: msg.messageId,
+          channel_metadata: {
+            phone: msg.phone,
+            sender_name: msg.senderName ?? null,
+            ...(msg.referral ? { referral: msg.referral } : {}),
+          },
+          media_url: mediaUrl,
+          media_type: mediaType,
+          media_mime: mediaMime,
+          media_caption: msg.caption ?? null,
+          transcription,
+          vision_caption: visionCaption,
+          occurred_at: occurredAt,
+        })
+      if (inboundInsertError) {
+        // Unique index on channel_message_id: a concurrent Meta retry already
+        // owns this message. Skip so we don't send a duplicate reply.
+        console.log("[WhatsApp] Duplicate webhook suppressed:", msg.messageId)
+        continue
+      }
 
       console.log("[WhatsApp] Inbound saved for:", contactId)
 
@@ -276,10 +284,13 @@ async function processAndReply(body: any) {
         .select("direction, body")
         .eq("contact_id", contactId)
         .eq("type", "whatsapp_message")
-        .order("occurred_at", { ascending: true })
+        .order("occurred_at", { ascending: false })
         .limit(10)
 
-      const conversationHistory = (history ?? [])
+      // Fetch the most RECENT 10, then restore chronological order. (Ascending
+      // + limit returned the oldest 10, so the bot never saw recent turns.)
+      const conversationHistory = [...(history ?? [])]
+        .reverse()
         .filter((h) => h.body)
         .map((h) => ({
           role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
@@ -312,6 +323,16 @@ async function processAndReply(body: any) {
         conversationHistory
       )
 
+      // AI call failed (retired model / bad key / outage). Alert the operator
+      // instead of silently sending a canned reply, and let a human take over.
+      if (!aiResponse) {
+        await alertAdminSystemFailure(
+          "Bot de IA caído",
+          `La IA no pudo responder un WhatsApp (contacto ${contactId}). Revisa el modelo/credenciales de Anthropic — atiende manualmente mientras tanto.`
+        )
+        continue
+      }
+
       // --- Send reply via WhatsApp API ---
       const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)
 
@@ -328,6 +349,14 @@ async function processAndReply(body: any) {
         console.log("[WhatsApp] AI replied to:", contactId)
       } else {
         console.error("[WhatsApp] Failed to send reply to:", normalizedPhone, sent.error)
+        // Token / permission errors mean the channel is broken — alert, don't
+        // just log (an expired token silently kills every reply otherwise).
+        if ([190, 200, 463, 467].includes(Number(sent.errorCode))) {
+          await alertAdminSystemFailure(
+            "Envío de WhatsApp fallando",
+            `No se pudo enviar la respuesta del bot: ${sent.error}. Probablemente el token de Meta expiró — renuévalo en Business Manager.`
+          )
+        }
       }
     } catch (error) {
       console.error("[WhatsApp] Error:", error)

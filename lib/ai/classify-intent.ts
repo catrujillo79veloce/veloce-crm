@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import Anthropic from "@anthropic-ai/sdk"
+import { INTENT_MODEL } from "./models"
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -73,7 +74,7 @@ export async function classifyIntent(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
+      model: INTENT_MODEL,
       max_tokens: 60,
       system: SYSTEM_PROMPT,
       messages: [

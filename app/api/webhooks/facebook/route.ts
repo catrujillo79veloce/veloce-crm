@@ -10,7 +10,7 @@ import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
-import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { notifyAdminOfNewMessage, alertAdminSystemFailure } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
@@ -222,24 +222,32 @@ async function processMessengerMessages(body: any) {
         }
 
         // --- Save inbound ---
-        await supabase.from("crm_interactions").insert({
-          contact_id: contactId,
-          type: "facebook_message",
-          direction: "inbound",
-          body: text,
-          channel_message_id: messageId,
-          channel_metadata: {
-            sender_id: senderId,
-            timestamp,
-            ...(referral ? { referral } : {}),
-          },
-          media_url: mediaUrl,
-          media_type: mediaType,
-          media_mime: mediaMime,
-          transcription,
-          vision_caption: visionCaption,
-          occurred_at: new Date(timestamp).toISOString(),
-        })
+        const { error: inboundInsertError } = await supabase
+          .from("crm_interactions")
+          .insert({
+            contact_id: contactId,
+            type: "facebook_message",
+            direction: "inbound",
+            body: text,
+            channel_message_id: messageId,
+            channel_metadata: {
+              sender_id: senderId,
+              timestamp,
+              ...(referral ? { referral } : {}),
+            },
+            media_url: mediaUrl,
+            media_type: mediaType,
+            media_mime: mediaMime,
+            transcription,
+            vision_caption: visionCaption,
+            occurred_at: new Date(timestamp).toISOString(),
+          })
+        if (inboundInsertError) {
+          // Unique index on channel_message_id: a concurrent Meta retry already
+          // owns this message. Skip so we don't send a duplicate reply.
+          console.log("[Messenger] Duplicate webhook suppressed:", messageId)
+          continue
+        }
 
         // Referral-only event (ad click, no text/media): the pauta is already
         // attached to the contact + thread — nothing for alerts or the bot to do.
@@ -304,10 +312,13 @@ async function processMessengerMessages(body: any) {
           .select("direction, body")
           .eq("contact_id", contactId)
           .eq("type", "facebook_message")
-          .order("occurred_at", { ascending: true })
+          .order("occurred_at", { ascending: false })
           .limit(10)
 
-        const conversationHistory = (history ?? [])
+        // Most RECENT 10, restored to chronological order (ascending+limit
+        // returned the oldest 10, so the bot never saw recent turns).
+        const conversationHistory = [...(history ?? [])]
+          .reverse()
           .filter((h) => h.body)
           .map((h) => ({
             role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
@@ -336,6 +347,16 @@ async function processMessengerMessages(body: any) {
           conversationHistory
         )
 
+        // AI failed — alert the operator instead of silently sending a canned
+        // reply, and let a human take over.
+        if (!aiResponse) {
+          await alertAdminSystemFailure(
+            "Bot de IA caído",
+            `La IA no pudo responder un Messenger (contacto ${contactId}). Revisa el modelo/credenciales de Anthropic — atiende manualmente mientras tanto.`
+          )
+          continue
+        }
+
         // --- Send via Messenger ---
         const sent = await sendFacebookMessage(senderId, aiResponse)
 
@@ -351,6 +372,12 @@ async function processMessengerMessages(body: any) {
           console.log("[Messenger] AI replied to:", contactId)
         } else {
           console.error("[Messenger] Send failed:", senderId, sent.error)
+          if ([190, 200, 463, 467].includes(Number(sent.errorCode))) {
+            await alertAdminSystemFailure(
+              "Envío de Messenger fallando",
+              `No se pudo enviar la respuesta del bot: ${sent.error}. Probablemente el token de la página de Facebook expiró.`
+            )
+          }
         }
       } catch (error) {
         console.error("[Messenger] Event error:", error)

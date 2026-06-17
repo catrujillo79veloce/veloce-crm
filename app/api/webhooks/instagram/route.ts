@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import {
-  verifyWebhookSignature,
-  computeExpectedSignature,
-} from "@/lib/integrations/webhook-verify"
+import { verifyWebhookSignatureAny } from "@/lib/integrations/webhook-verify"
 import { parseInstagramWebhook, sendInstagramMessage } from "@/lib/integrations/instagram"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
-import { notifyAdminOfNewMessage } from "@/lib/ai/notify-admin"
+import { notifyAdminOfNewMessage, alertAdminSystemFailure } from "@/lib/ai/notify-admin"
 import { shouldAIReply } from "@/lib/ai/should-reply"
 import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { transcribeAudio } from "@/lib/ai/transcribe"
@@ -48,27 +45,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
 
-  // Verify signature
+  // Verify signature against both candidate app secrets. The IG + FB products
+  // share one Meta app, so the real app secret is a single value, but it may be
+  // stored under either env var (INSTAGRAM_APP_SECRET was historically set to a
+  // wrong value). Accepting either lets us enforce signatures without risking
+  // rejection of legitimate traffic over the env-var mixup. Fail closed.
   const signature = request.headers.get("x-hub-signature-256") ?? ""
-  const appSecret = process.env.INSTAGRAM_APP_SECRET ?? ""
-
-  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
-    // Diagnostic: log received vs expected prefix so Carlos can compare
-    // and decide whether INSTAGRAM_APP_SECRET still needs fixing.
-    const expected = computeExpectedSignature(rawBody, appSecret)
-    console.warn(
-      "[Instagram Webhook] Sig mismatch | received:",
-      signature.slice(0, 24),
-      "| expected:",
-      expected.slice(0, 24),
-      "| body_len:",
-      rawBody.length
-    )
-    // TEMPORARY BYPASS — re-enable the line below once received == expected.
-    // return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
-  } else if (appSecret) {
-    // Optional: confirm in logs when signature does match
-    // console.log("[Instagram Webhook] Signature OK")
+  const verified = verifyWebhookSignatureAny(rawBody, signature, [
+    process.env.INSTAGRAM_APP_SECRET,
+    process.env.FACEBOOK_APP_SECRET,
+  ])
+  if (!verified) {
+    console.warn("[Instagram Webhook] Invalid signature — rejected")
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
   let body: any
@@ -288,10 +277,13 @@ async function processInstagramMessages(body: any) {
         .select("direction, body")
         .eq("contact_id", contactId)
         .eq("type", "instagram_message")
-        .order("occurred_at", { ascending: true })
+        .order("occurred_at", { ascending: false })
         .limit(10)
 
-      const conversationHistory = (history ?? [])
+      // Most RECENT 10, restored to chronological order (ascending+limit
+      // returned the oldest 10, so the bot never saw recent turns).
+      const conversationHistory = [...(history ?? [])]
+        .reverse()
         .filter((h) => h.body)
         .map((h) => ({
           role: (h.direction === "inbound" ? "user" : "assistant") as "user" | "assistant",
@@ -321,6 +313,16 @@ async function processInstagramMessages(body: any) {
         conversationHistory
       )
 
+      // AI failed — alert the operator instead of silently sending a canned
+      // reply, and let a human take over.
+      if (!aiResponse) {
+        await alertAdminSystemFailure(
+          "Bot de IA caído",
+          `La IA no pudo responder un Instagram (contacto ${contactId}). Revisa el modelo/credenciales de Anthropic — atiende manualmente mientras tanto.`
+        )
+        continue
+      }
+
       // --- Send reply via Instagram API ---
       const sent = await sendInstagramMessage(msg.senderId, aiResponse)
 
@@ -336,6 +338,12 @@ async function processInstagramMessages(body: any) {
         console.log("[Instagram] AI replied to:", contactId)
       } else {
         console.error("[Instagram] Failed to send reply to:", msg.senderId, sent.error)
+        if ([190, 200, 463, 467].includes(Number(sent.errorCode))) {
+          await alertAdminSystemFailure(
+            "Envío de Instagram fallando",
+            `No se pudo enviar la respuesta del bot: ${sent.error}. Probablemente el token de Instagram expiró.`
+          )
+        }
       }
     } catch (error) {
       console.error("[Instagram] Message processing error:", error)
