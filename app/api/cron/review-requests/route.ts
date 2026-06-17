@@ -17,12 +17,13 @@ export const maxDuration = 60
 
 export async function GET(request: NextRequest) {
   // Auth: Vercel Cron sends "Authorization: Bearer <CRON_SECRET>"
+  // Fail closed: require the CRON_SECRET bearer. Vercel Cron sends it
+  // automatically when CRON_SECRET is configured; if it's unset we refuse
+  // rather than run unauthenticated (this endpoint messages customers).
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = request.headers.get("authorization")
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+  const auth = request.headers.get("authorization")
+  if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   const supabase = createAdminClient()
