@@ -45,19 +45,28 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
 
-  // Verify signature against both candidate app secrets. The IG + FB products
-  // share one Meta app, so the real app secret is a single value, but it may be
-  // stored under either env var (INSTAGRAM_APP_SECRET was historically set to a
-  // wrong value). Accepting either lets us enforce signatures without risking
-  // rejection of legitimate traffic over the env-var mixup. Fail closed.
+  // Signature verification — SOFT MODE (temporary).
+  //
+  // Instagram messaging uses Instagram Login (IGAA tokens, graph.instagram.com)
+  // and Meta signs those webhooks with the dedicated INSTAGRAM-APP secret, which
+  // is NOT the shared Meta/Facebook app secret. Our env vars only hold the
+  // Facebook app secret (FACEBOOK_APP_SECRET == META_APP_SECRET == WHATSAPP_APP_SECRET);
+  // INSTAGRAM_APP_SECRET currently holds a wrong value. Hard-rejecting therefore
+  // 401s ALL real IG traffic and takes the bot offline. So: verify against the
+  // secrets we have, log the result, but PROCESS regardless. Once the real
+  // Instagram app secret is set in INSTAGRAM_APP_SECRET (Meta dashboard → app →
+  // Instagram → API setup with Instagram login), flip this back to a hard 401.
   const signature = request.headers.get("x-hub-signature-256") ?? ""
   const verified = verifyWebhookSignatureAny(rawBody, signature, [
     process.env.INSTAGRAM_APP_SECRET,
     process.env.FACEBOOK_APP_SECRET,
+    process.env.META_APP_SECRET,
   ])
   if (!verified) {
-    console.warn("[Instagram Webhook] Invalid signature — rejected")
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+    console.warn(
+      "[Instagram Webhook] Signature unmatched — processing in SOFT mode (set the real INSTAGRAM_APP_SECRET to re-enable rejection). recv=",
+      signature.slice(0, 20)
+    )
   }
 
   let body: any
