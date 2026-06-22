@@ -200,20 +200,22 @@ async function processMessengerMessages(body: any) {
               kind: media.kind,
               mime: media.mime,
             })
+            // Trust the bytes, not Meta's attachment type: a shared reel /
+            // video story-reply arrives tagged `image` but is really an MP4.
             mediaUrl = stored.url
-            mediaMime = media.mime
-            mediaType = media.kind
+            mediaMime = stored.mime
+            mediaType = stored.kind
 
-            if (media.kind === "audio") {
+            if (stored.kind === "audio") {
               transcription = await transcribeAudio({
                 audioUrl: stored.url,
-                mime: mediaMime,
+                mime: stored.mime,
               })
             }
-            if (media.kind === "image") {
+            if (stored.kind === "image") {
               visionCaption = await captionImage({
                 imageUrl: stored.url,
-                mime: mediaMime,
+                mime: stored.mime,
               })
             }
           } catch (e) {

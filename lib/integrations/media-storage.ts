@@ -22,6 +22,13 @@ export type MediaKind = "image" | "audio" | "video" | "document" | "sticker"
 interface StoreResult {
   url: string
   storagePath: string
+  /**
+   * The TRUE media type, resolved from the file's magic bytes — not the hint
+   * the caller passed in. Meta mislabels shared reels / video story-replies as
+   * `image` attachments, so trust this, not the webhook's attachment type.
+   */
+  mime: string
+  kind: MediaKind
 }
 
 interface StoreParams {
@@ -66,9 +73,36 @@ export async function downloadAndStore(
   const blob = await downloadResp.arrayBuffer()
   const bytes = new Uint8Array(blob)
 
+  // --- Resolve the REAL media type from the bytes ---
+  // Meta labels shared reels and video story-replies as `image` attachments,
+  // but payload.url is actually an MP4. Sniffing the magic bytes (falling back
+  // to the HTTP Content-Type, then the caller's hint) stops us storing a video
+  // as image/jpeg and feeding it to the image-only vision API.
+  const headerMime = (downloadResp.headers.get("content-type") ?? "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase()
+  const sniffed = sniffMimeFromBytes(bytes)
+  let resolvedMime: string
+  let resolvedKind: MediaKind
+  if (kind === "audio") {
+    // Audio containers (m4a/mp4) can sniff as video — never downgrade audio,
+    // or we'd skip transcription for a voice note.
+    resolvedKind = "audio"
+    resolvedMime =
+      sniffed && sniffed.startsWith("audio/")
+        ? sniffed
+        : isConcreteMime(headerMime) && headerMime.startsWith("audio/")
+          ? headerMime
+          : mime
+  } else {
+    resolvedMime = sniffed ?? (isConcreteMime(headerMime) ? headerMime : mime)
+    resolvedKind = kindFromMime(resolvedMime)
+  }
+
   // --- Build a storage path: contactId/yyyymmdd-uuid.ext ---
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "")
-  const ext = pickExtension(mime, filename)
+  const ext = pickExtension(resolvedMime, filename)
   const safeName = filename
     ? filename.replace(/[^a-zA-Z0-9.\-_]/g, "_")
     : `${kind}-${randomUUID()}${ext}`
@@ -78,7 +112,7 @@ export async function downloadAndStore(
   const { error: upErr } = await supabase.storage
     .from(STORAGE_BUCKET)
     .upload(storagePath, bytes, {
-      contentType: mime,
+      contentType: resolvedMime,
       upsert: false,
     })
   if (upErr) {
@@ -90,7 +124,62 @@ export async function downloadAndStore(
     data: { publicUrl },
   } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath)
 
-  return { url: publicUrl, storagePath }
+  return { url: publicUrl, storagePath, mime: resolvedMime, kind: resolvedKind }
+}
+
+// ---------------------------------------------------------------------------
+// Magic-byte sniffing — identify a file by its leading bytes.
+//
+// Meta mislabels shared reels / video story-replies as `image` attachments, so
+// the attachment "type" in the webhook can't be trusted. Returns null when the
+// signature isn't recognized (caller falls back to the hinted mime).
+// ---------------------------------------------------------------------------
+
+export function sniffMimeFromBytes(bytes: Uint8Array): string | null {
+  const b = bytes
+  if (b.length < 12) return null
+
+  // JPEG: FF D8 FF
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg"
+  // PNG: 89 50 4E 47
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)
+    return "image/png"
+  // GIF: 47 49 46 38 ("GIF8")
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38)
+    return "image/gif"
+  // WEBP: "RIFF"...."WEBP"
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  )
+    return "image/webp"
+  // ISO Base Media (MP4/MOV/M4A): bytes 4-7 = "ftyp"
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    const brand = String.fromCharCode(b[8], b[9], b[10], b[11])
+    // Audio-only brands keep an audio mime; everything else is video.
+    if (brand.startsWith("M4A") || brand.startsWith("M4B")) return "audio/mp4"
+    return "video/mp4"
+  }
+  // OGG: "OggS"
+  if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53)
+    return "audio/ogg"
+  // MP3: "ID3" tag
+  if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "audio/mpeg"
+  // PDF: "%PDF"
+  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46)
+    return "application/pdf"
+
+  return null
+}
+
+/** True when a Content-Type header is specific enough to trust. */
+function isConcreteMime(mime: string): boolean {
+  return (
+    !!mime &&
+    mime !== "application/octet-stream" &&
+    mime !== "binary/octet-stream" &&
+    mime.includes("/")
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +213,7 @@ export async function uploadBytesToStorage(params: {
     data: { publicUrl },
   } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath)
 
-  return { url: publicUrl, storagePath }
+  return { url: publicUrl, storagePath, mime, kind: kindFromMime(mime) }
 }
 
 /** Infer a coarse media kind from a MIME type. */

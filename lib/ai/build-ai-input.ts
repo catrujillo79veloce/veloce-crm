@@ -26,7 +26,27 @@ export function buildAIInput(params: BuildAIInputParams): string | null {
   if (transcription) parts.push(`[Audio del cliente]: ${transcription}`)
   if (visionCaption) parts.push(`[Imagen que envio el cliente]: ${visionCaption}`)
   if (parts.length === 0 && mediaType) {
-    parts.push(`[El cliente envio un archivo de tipo ${mediaType} sin texto]`)
+    parts.push(mediaPlaceholder(mediaType))
   }
   return parts.length ? parts.join("\n") : null
+}
+
+/**
+ * Note for the bot when a customer sends media we couldn't turn into text.
+ * Keep it instructive (tell the bot what to DO) so it never flatly answers
+ * "no puedo ver imágenes" — especially for shared reels/stories, which are
+ * videos, not images.
+ */
+function mediaPlaceholder(mediaType: string): string {
+  switch (mediaType) {
+    case "video":
+      return "[El cliente compartio un video (posiblemente un reel o una historia de Instagram). No puedes verlo; preguntale amablemente de que se trata o en que puedes ayudarle.]"
+    case "image":
+    case "sticker":
+      return "[El cliente envio una imagen que no se pudo procesar. Pidele amablemente que la describa o la reenvie.]"
+    case "audio":
+      return "[El cliente envio un audio que no se pudo transcribir. Pidele que escriba su mensaje.]"
+    default:
+      return `[El cliente envio un archivo de tipo ${mediaType} que no puedes abrir. Preguntale en que puedes ayudarle.]`
+  }
 }
