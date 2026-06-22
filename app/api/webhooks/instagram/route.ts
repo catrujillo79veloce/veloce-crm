@@ -62,7 +62,12 @@ export async function POST(request: NextRequest) {
     process.env.FACEBOOK_APP_SECRET,
     process.env.META_APP_SECRET,
   ])
-  if (!verified) {
+  if (verified) {
+    // The real dedicated Instagram app secret is now set. We log this on real
+    // deliveries to confirm validation BEFORE flipping back to a hard 401 — a
+    // verified=true here means the same check will pass under strict mode too.
+    console.log("[Instagram Webhook] Signature OK")
+  } else {
     console.warn(
       "[Instagram Webhook] Signature unmatched — processing in SOFT mode (set the real INSTAGRAM_APP_SECRET to re-enable rejection). recv=",
       signature.slice(0, 20)
