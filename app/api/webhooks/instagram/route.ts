@@ -45,33 +45,27 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
 
-  // Signature verification — SOFT MODE (temporary).
+  // Signature verification — STRICT (fail closed).
   //
   // Instagram messaging uses Instagram Login (IGAA tokens, graph.instagram.com)
-  // and Meta signs those webhooks with the dedicated INSTAGRAM-APP secret, which
-  // is NOT the shared Meta/Facebook app secret. Our env vars only hold the
-  // Facebook app secret (FACEBOOK_APP_SECRET == META_APP_SECRET == WHATSAPP_APP_SECRET);
-  // INSTAGRAM_APP_SECRET currently holds a wrong value. Hard-rejecting therefore
-  // 401s ALL real IG traffic and takes the bot offline. So: verify against the
-  // secrets we have, log the result, but PROCESS regardless. Once the real
-  // Instagram app secret is set in INSTAGRAM_APP_SECRET (Meta dashboard → app →
-  // Instagram → API setup with Instagram login), flip this back to a hard 401.
+  // and Meta signs those webhooks with the dedicated Instagram-app secret, which
+  // is NOT the shared Meta/Facebook app secret — enforcing against the wrong one
+  // previously 401'd all real IG traffic. The real secret now lives in
+  // INSTAGRAM_APP_SECRET and was verified against REAL Meta deliveries
+  // (2026-08-06: every inbound logged "Signature OK" in soft mode), so
+  // rejecting mismatches no longer drops legitimate traffic.
+  //
+  // All three secrets belong to the same Meta app, so accepting any of them
+  // keeps this resilient to an env-var mixup without widening the trust domain.
   const signature = request.headers.get("x-hub-signature-256") ?? ""
   const verified = verifyWebhookSignatureAny(rawBody, signature, [
     process.env.INSTAGRAM_APP_SECRET,
     process.env.FACEBOOK_APP_SECRET,
     process.env.META_APP_SECRET,
   ])
-  if (verified) {
-    // The real dedicated Instagram app secret is now set. We log this on real
-    // deliveries to confirm validation BEFORE flipping back to a hard 401 — a
-    // verified=true here means the same check will pass under strict mode too.
-    console.log("[Instagram Webhook] Signature OK")
-  } else {
-    console.warn(
-      "[Instagram Webhook] Signature unmatched — processing in SOFT mode (set the real INSTAGRAM_APP_SECRET to re-enable rejection). recv=",
-      signature.slice(0, 20)
-    )
+  if (!verified) {
+    console.warn("[Instagram Webhook] Invalid signature — rejected")
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
   let body: any
