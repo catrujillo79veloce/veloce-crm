@@ -9,7 +9,7 @@ import { shouldAIReply } from "@/lib/ai/should-reply"
 import { downloadAndStore } from "@/lib/integrations/media-storage"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
-import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { buildAIInput, describeInbound } from "@/lib/ai/build-ai-input"
 import { classifyIntent } from "@/lib/ai/classify-intent"
 import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
@@ -95,6 +95,11 @@ async function processInstagramMessages(body: any) {
   if (messages.length === 0) return
 
   const supabase = createAdminClient()
+
+  // Alerts and tagging run concurrently with the AI reply but are awaited
+  // before returning — Vercel freezes the instance as soon as the webhook
+  // responds, which silently kills genuinely fire-and-forget work.
+  const background: Promise<unknown>[] = []
 
   for (const msg of messages) {
     try {
@@ -223,8 +228,24 @@ async function processInstagramMessages(body: any) {
           occurred_at: new Date(msg.timestamp).toISOString(),
         })
       if (inboundInsertError) {
-        // DB unique guard: concurrent process already handled this message
-        console.log("[Instagram] Duplicate webhook suppressed:", msg.messageId)
+        // 23505 = unique guard on channel_message_id (a concurrent retry).
+        // Anything else means the customer's message was lost, which must not
+        // be logged as a harmless duplicate.
+        if (inboundInsertError.code === "23505") {
+          console.log("[Instagram] Duplicate webhook suppressed:", msg.messageId)
+        } else {
+          console.error(
+            "[Instagram] MESSAGE LOST — insert failed:",
+            inboundInsertError.code,
+            inboundInsertError.message
+          )
+          background.push(
+            alertAdminSystemFailure(
+              "Mensaje perdido al guardar",
+              `No se pudo guardar un DM de Instagram (${inboundInsertError.code ?? "sin código"}: ${inboundInsertError.message}). Revísalo manualmente en Instagram.`
+            ).catch((e) => console.error("[Instagram] Loss alert failed:", e))
+          )
+        }
         continue
       }
 
@@ -235,41 +256,54 @@ async function processInstagramMessages(body: any) {
       if (!msg.message && !msg.media) continue
 
       // --- HOT ALERT ---
-      const detection = detectHotMessage(msg.message)
+      // Built from the transcription / vision caption too — for a voice note
+      // or a photo the raw text field is empty, which made media alerts arrive
+      // blank and kept the buying-intent detector from ever firing on them.
+      const alertText = describeInbound({
+        text: msg.message,
+        transcription,
+        visionCaption,
+        mediaType,
+      })
+      const detection = detectHotMessage(alertText)
       const contactName = `Instagram User ${msg.senderId.slice(-6)}`
-      let hotPingFired = false
-      if (detection.isHot) {
-        hotPingFired = true
-        sendHotAlert({
-          adminPhone: ADMIN_PHONE,
-          contactName,
-          contactId,
-          channel: "instagram",
-          message: msg.message,
-          detection,
-        }).catch((e) => console.error("[Instagram] Hot alert failed:", e))
-      }
+      const hotPingFired = detection.isHot
 
-      // --- GENERIC NOTIFY: debounced ping for every new inbound ---
-      notifyAdminOfNewMessage({
-        supabase,
-        contactId,
-        contactName,
-        channel: "instagram",
-        message: msg.message,
-        skip: hotPingFired,
-      }).catch((e) => console.error("[Instagram] Notify admin failed:", e))
+      if (hotPingFired) {
+        background.push(
+          sendHotAlert({
+            adminPhone: ADMIN_PHONE,
+            contactName,
+            contactId,
+            channel: "instagram",
+            message: alertText,
+            detection,
+          }).catch((e) => console.error("[Instagram] Hot alert failed:", e))
+        )
+      }
+      background.push(
+        notifyAdminOfNewMessage({
+          supabase,
+          contactId,
+          contactName,
+          channel: "instagram",
+          message: alertText,
+          skip: hotPingFired,
+        }).catch((e) => console.error("[Instagram] Notify admin failed:", e))
+      )
 
       // --- AUTO-TAG by intent (fire-and-forget) ---
       const intentInput = transcription
         ? `${msg.message} ${transcription}`.trim()
         : msg.message
       if (intentInput && intentInput.length > 2) {
-        classifyIntent(intentInput)
-          .then((res) => {
-            if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
-          })
-          .catch((e) => console.error("[Instagram] Intent tag failed:", e))
+        background.push(
+          classifyIntent(intentInput)
+            .then((res) => {
+              if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
+            })
+            .catch((e) => console.error("[Instagram] Intent tag failed:", e))
+        )
       }
 
       // --- AI REPLY GATE: respect per-contact pause + global pause ---
@@ -359,4 +393,7 @@ async function processInstagramMessages(body: any) {
       console.error("[Instagram] Message processing error:", error)
     }
   }
+
+  // Let alerts and tagging finish before the runtime freezes this instance.
+  await Promise.allSettled(background)
 }

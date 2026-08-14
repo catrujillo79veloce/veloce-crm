@@ -101,6 +101,10 @@ export interface Contact {
   avatar_url: string | null
   ai_enabled?: boolean
   ai_paused_at?: string | null
+  /** When a human last opened this conversation in the inbox. Drives unread. */
+  inbox_read_at?: string | null
+  /** Debounce clock for push alerts (separate from the WhatsApp admin ping). */
+  last_push_notified_at?: string | null
   created_at: string
   updated_at: string
   tags?: Tag[]

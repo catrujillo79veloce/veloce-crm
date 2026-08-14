@@ -32,6 +32,41 @@ export function buildAIInput(params: BuildAIInputParams): string | null {
 }
 
 /**
+ * Human-readable version of the same content, for the operator's alerts and
+ * for buying-intent detection.
+ *
+ * These two used to be fed the raw `text` field alone, which is empty for
+ * every voice note, photo and video — so the phone alert arrived blank and the
+ * hot-lead detector never fired on media. A voice note saying "quiero separar
+ * la Orbea" produced no 🔥 and a notification with nothing in the body.
+ */
+export function describeInbound(params: BuildAIInputParams): string {
+  const { text, caption, transcription, visionCaption, mediaType } = params
+  const parts: string[] = []
+  if (text) parts.push(text)
+  if (caption) parts.push(caption)
+  if (transcription) parts.push(`🎤 "${transcription}"`)
+  if (visionCaption) parts.push(`📷 ${visionCaption}`)
+  if (parts.length === 0) {
+    switch (mediaType) {
+      case "video":
+        return "🎬 Envió un video"
+      case "image":
+        return "📷 Envió una foto"
+      case "sticker":
+        return "😀 Envió un sticker"
+      case "audio":
+        return "🎤 Envió una nota de voz (no se pudo transcribir)"
+      case "document":
+        return "📄 Envió un documento"
+      default:
+        return mediaType ? `Envió un archivo (${mediaType})` : "Mensaje nuevo"
+    }
+  }
+  return parts.join(" — ")
+}
+
+/**
  * Note for the bot when a customer sends media we couldn't turn into text.
  * Keep it instructive (tell the bot what to DO) so it never flatly answers
  * "no puedo ver imágenes" — especially for shared reels/stories, which are

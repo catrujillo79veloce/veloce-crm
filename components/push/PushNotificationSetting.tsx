@@ -1,83 +1,50 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, BellOff, Loader2, Check, Smartphone } from "lucide-react"
+import { Bell, BellOff, Loader2, Check, Smartphone, Share } from "lucide-react"
+import {
+  disablePush,
+  enablePush,
+  getPushState,
+  type PushState,
+} from "@/lib/push/client"
 
 // ---------------------------------------------------------------------------
 // PushNotificationSetting
 // Settings card to enable/disable Web Push on THIS device + send a test.
+// The subscription logic lives in lib/push/client so this card and the
+// app-wide banner can never disagree about what "enabled" means.
 // ---------------------------------------------------------------------------
 
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
-  const raw = atob(base64)
-  const output = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i)
-  return output
-}
-
-type State = "loading" | "unsupported" | "denied" | "off" | "on"
-
 export default function PushNotificationSetting() {
-  const [state, setState] = useState<State>("loading")
+  const [state, setState] = useState<PushState>("loading")
   const [busy, setBusy] = useState(false)
-  const [tested, setTested] = useState(false)
+  const [tested, setTested] = useState<"idle" | "sent" | "nobody" | "error">(
+    "idle"
+  )
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    async function init() {
-      if (
-        typeof window === "undefined" ||
-        !("serviceWorker" in navigator) ||
-        !("PushManager" in window)
-      ) {
-        setState("unsupported")
-        return
-      }
-      if (Notification.permission === "denied") {
-        setState("denied")
-        return
-      }
-      try {
-        const reg = await navigator.serviceWorker.ready
-        const sub = await reg.pushManager.getSubscription()
-        setState(sub ? "on" : "off")
-      } catch {
-        setState("off")
-      }
+    let cancelled = false
+    getPushState().then((s) => {
+      if (!cancelled) setState(s)
+    })
+    return () => {
+      cancelled = true
     }
-    init()
   }, [])
 
   async function enable() {
-    if (!VAPID_PUBLIC_KEY) {
-      alert("Falta configurar la clave VAPID (NEXT_PUBLIC_VAPID_PUBLIC_KEY).")
-      return
-    }
     setBusy(true)
+    setError(null)
     try {
-      const permission = await Notification.requestPermission()
-      if (permission !== "granted") {
-        setState(permission === "denied" ? "denied" : "off")
-        return
+      const result = await enablePush()
+      if (result.ok) {
+        setState("on")
+      } else {
+        setState(result.state)
+        if (result.error) setError(result.error)
       }
-      const reg = await navigator.serviceWorker.ready
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
-      })
-      const res = await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscription: sub.toJSON() }),
-      })
-      if (!res.ok) throw new Error()
-      setState("on")
-    } catch (e) {
-      console.error("[Push] Enable failed:", e)
-      setState("off")
     } finally {
       setBusy(false)
     }
@@ -86,16 +53,7 @@ export default function PushNotificationSetting() {
   async function disable() {
     setBusy(true)
     try {
-      const reg = await navigator.serviceWorker.ready
-      const sub = await reg.pushManager.getSubscription()
-      if (sub) {
-        await fetch("/api/push/subscribe", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint: sub.endpoint }),
-        })
-        await sub.unsubscribe()
-      }
+      await disablePush()
       setState("off")
     } catch (e) {
       console.error("[Push] Disable failed:", e)
@@ -106,11 +64,18 @@ export default function PushNotificationSetting() {
 
   async function test() {
     setBusy(true)
-    setTested(false)
+    setTested("idle")
     try {
-      await fetch("/api/push/test", { method: "POST" })
-      setTested(true)
-      setTimeout(() => setTested(false), 3000)
+      const res = await fetch("/api/push/test", { method: "POST" })
+      const data = await res.json().catch(() => ({}))
+      // A test that "succeeds" while reaching zero devices is the exact
+      // failure this screen exists to catch — say so instead of showing a tick.
+      if (res.ok && (data.sent ?? 0) > 0) setTested("sent")
+      else if (res.ok) setTested("nobody")
+      else setTested("error")
+      setTimeout(() => setTested("idle"), 5000)
+    } catch {
+      setTested("error")
     } finally {
       setBusy(false)
     }
@@ -120,7 +85,9 @@ export default function PushNotificationSetting() {
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
       <div className="flex items-center gap-2 mb-1">
         <Smartphone className="h-5 w-5 text-veloce-600" />
-        <h3 className="font-semibold text-gray-900">Notificaciones en este dispositivo</h3>
+        <h3 className="font-semibold text-gray-900">
+          Notificaciones en este dispositivo
+        </h3>
       </div>
       <p className="text-sm text-gray-500 mb-4">
         Recibe una alerta instantánea cuando llegue un mensaje nuevo, aunque no
@@ -131,11 +98,18 @@ export default function PushNotificationSetting() {
         <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
       )}
 
+      {state === "needs-install" && (
+        <p className="text-sm text-amber-600">
+          En iPhone las notificaciones solo funcionan con el CRM instalado:
+          toca <Share className="inline h-3.5 w-3.5 -mt-0.5" /> Compartir →
+          &quot;Agregar a inicio&quot;, abre el CRM desde ese ícono y vuelve
+          aquí.
+        </p>
+      )}
+
       {state === "unsupported" && (
         <p className="text-sm text-amber-600">
-          Este navegador no soporta notificaciones push. En iPhone: abre el CRM
-          en Safari, tócalo "Compartir" → "Agregar a inicio", ábrelo desde el
-          ícono y vuelve aquí.
+          Este navegador no soporta notificaciones push.
         </p>
       )}
 
@@ -152,7 +126,11 @@ export default function PushNotificationSetting() {
           disabled={busy}
           className="inline-flex items-center gap-2 bg-veloce-600 hover:bg-veloce-700 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Bell className="h-4 w-4" />
+          )}
           Activar notificaciones
         </button>
       )}
@@ -168,8 +146,12 @@ export default function PushNotificationSetting() {
             disabled={busy}
             className="inline-flex items-center gap-1.5 text-sm border border-gray-300 hover:bg-gray-50 px-3 py-1.5 rounded-lg font-medium"
           >
-            {tested ? <Check className="h-4 w-4 text-green-600" /> : <Bell className="h-4 w-4" />}
-            {tested ? "Enviada" : "Probar"}
+            {tested === "sent" ? (
+              <Check className="h-4 w-4 text-green-600" />
+            ) : (
+              <Bell className="h-4 w-4" />
+            )}
+            {tested === "sent" ? "Enviada" : "Probar"}
           </button>
           <button
             onClick={disable}
@@ -181,6 +163,20 @@ export default function PushNotificationSetting() {
           </button>
         </div>
       )}
+
+      {tested === "nobody" && (
+        <p className="mt-3 text-sm text-amber-600">
+          El servidor no encontró ningún dispositivo suscrito. Desactiva y
+          vuelve a activar las notificaciones en este equipo.
+        </p>
+      )}
+      {tested === "error" && (
+        <p className="mt-3 text-sm text-red-600">
+          No se pudo enviar la prueba. Revisa que las claves VAPID estén
+          configuradas en el servidor.
+        </p>
+      )}
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
     </div>
   )
 }

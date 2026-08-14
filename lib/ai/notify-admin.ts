@@ -16,7 +16,12 @@ import type { createAdminClient } from "@/lib/supabase/admin"
 const ADMIN_PHONE = process.env.ADMIN_ALERT_PHONE ?? "573176354893"
 const CRM_BASE_URL =
   process.env.NEXT_PUBLIC_CRM_BASE_URL ?? "https://crm.bicicletasveloce.com"
+// The WhatsApp ping is noisy (it lands in the operator's own chat list), so it
+// stays heavily debounced. Push is the primary alert and is silent-by-design,
+// so it gets a much shorter window — a customer writing again 3 minutes later
+// is new information, not spam.
 const DEBOUNCE_MINUTES = 15
+const PUSH_DEBOUNCE_SECONDS = 60
 
 type Channel = "whatsapp" | "instagram" | "facebook"
 
@@ -48,32 +53,63 @@ export async function notifyAdminOfNewMessage(
 ): Promise<boolean> {
   const { supabase, contactId, contactName, channel, message, skip } = params
 
-  if (skip) return false
-
-  // --- Debounce check ---
   const { data: contact } = await supabase
     .from("crm_contacts")
-    .select("last_admin_notified_at")
+    .select("last_admin_notified_at, last_push_notified_at")
     .eq("id", contactId)
     .single()
+
+  const preview =
+    message.length > 180 ? message.slice(0, 180) + "..." : message
+  const emoji = CHANNEL_EMOJI[channel]
+  const now = Date.now()
+
+  // --- Push to every team device ---------------------------------------
+  // This runs even when the hot-lead alert already fired via WhatsApp (that
+  // path pushes its own 🔥 notification) and even when the WhatsApp ping is
+  // debounced. Push is the alert that reaches a phone that isn't looking at
+  // the CRM, so silencing it was what made new messages go unnoticed.
+  const lastPush = contact?.last_push_notified_at
+    ? new Date(contact.last_push_notified_at).getTime()
+    : 0
+
+  if (!skip && now - lastPush > PUSH_DEBOUNCE_SECONDS * 1000) {
+    // Awaited on purpose: Vercel freezes the function once the webhook
+    // responds, which can kill an un-awaited push mid-flight.
+    const push = await sendPush({
+      title: `${emoji} ${contactName}`,
+      body: preview,
+      url: "/inbox",
+      tag: `contact-${contactId}`,
+      urgency: "high",
+    }).catch((e) => {
+      console.error("[NotifyAdmin] Push failed:", e)
+      return null
+    })
+
+    if (push && push.sent > 0) {
+      await supabase
+        .from("crm_contacts")
+        .update({ last_push_notified_at: new Date().toISOString() })
+        .eq("id", contactId)
+    }
+  }
+
+  // --- WhatsApp ping to the operator ------------------------------------
+  if (skip) return false
 
   const lastNotified = contact?.last_admin_notified_at
     ? new Date(contact.last_admin_notified_at).getTime()
     : 0
-  const cutoff = Date.now() - DEBOUNCE_MINUTES * 60 * 1000
+  const cutoff = now - DEBOUNCE_MINUTES * 60 * 1000
 
   if (lastNotified > cutoff) {
     console.log(
-      `[NotifyAdmin] Skipped (debounced) for contact ${contactId} — last ping was ${Math.round((Date.now() - lastNotified) / 60000)} min ago`
+      `[NotifyAdmin] WhatsApp ping debounced for contact ${contactId} — last one was ${Math.round((now - lastNotified) / 60000)} min ago`
     )
     return false
   }
 
-  // --- Build the ping ---
-  const preview =
-    message.length > 180 ? message.slice(0, 180) + "..." : message
-
-  const emoji = CHANNEL_EMOJI[channel]
   const alert = `${emoji} *Mensaje nuevo de ${channel.toUpperCase()}*
 
 👤 *${contactName}*
@@ -81,27 +117,13 @@ export async function notifyAdminOfNewMessage(
 
 🔗 ${CRM_BASE_URL}/inbox`
 
-  // --- Push notification to all team devices (fire-and-forget) ---
-  sendPush(
-    {
-      title: `${emoji} ${contactName}`,
-      body: preview,
-      url: "/inbox",
-      tag: `contact-${contactId}`,
-    }
-  ).catch((e) => console.error("[NotifyAdmin] Push failed:", e))
-
-  // --- Send WhatsApp ping ---
   const result = await sendWhatsAppMessage(ADMIN_PHONE, alert)
 
   if (!result.ok) {
-    console.error("[NotifyAdmin] Send failed:", result.error)
-    // Push may still have succeeded; treat the debounce as consumed only
-    // when the WhatsApp ping went through (push is best-effort).
+    console.error("[NotifyAdmin] WhatsApp ping failed:", result.error)
     return false
   }
 
-  // --- Update debounce timestamp ---
   await supabase
     .from("crm_contacts")
     .update({ last_admin_notified_at: new Date().toISOString() })
@@ -143,21 +165,25 @@ ${detail}
 
 🔗 ${CRM_BASE_URL}/inbox`
 
-  // Push to team devices (independent channel, best-effort)
-  sendPush({
-    title: `🚨 ${kind}`,
-    body: detail.slice(0, 180),
-    url: "/inbox",
-    tag: `sysfail-${kind}`,
-  }).catch((e) => console.error("[AlertAdmin] Push failed:", e))
+  // Both channels, awaited — an outage alert that gets frozen mid-flight by
+  // the serverless runtime is exactly the failure this function exists to stop.
+  const [push, wa] = await Promise.allSettled([
+    sendPush({
+      title: `🚨 ${kind}`,
+      body: detail.slice(0, 180),
+      url: "/inbox",
+      tag: `sysfail-${kind}`,
+      urgency: "high",
+    }),
+    sendWhatsAppMessage(ADMIN_PHONE, alert),
+  ])
 
-  // WhatsApp ping to the admin (independent of Anthropic / the broken channel)
-  try {
-    const result = await sendWhatsAppMessage(ADMIN_PHONE, alert)
-    if (!result.ok) {
-      console.error(`[AlertAdmin] WhatsApp ping failed for "${kind}":`, result.error)
-    }
-  } catch (e) {
-    console.error(`[AlertAdmin] WhatsApp ping threw for "${kind}":`, e)
+  if (push.status === "rejected") {
+    console.error(`[AlertAdmin] Push threw for "${kind}":`, push.reason)
+  }
+  if (wa.status === "rejected") {
+    console.error(`[AlertAdmin] WhatsApp ping threw for "${kind}":`, wa.reason)
+  } else if (!wa.value.ok) {
+    console.error(`[AlertAdmin] WhatsApp ping failed for "${kind}":`, wa.value.error)
   }
 }

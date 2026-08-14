@@ -3,6 +3,8 @@ import Sidebar from "@/components/layout/Sidebar"
 import TopBar from "@/components/layout/TopBar"
 import MobileNav from "@/components/layout/MobileNav"
 import ServiceWorkerRegister from "@/components/push/ServiceWorkerRegister"
+import EnablePushBanner from "@/components/push/EnablePushBanner"
+import InboxAlertsProvider from "@/components/notifications/InboxAlerts"
 
 async function getCurrentUser() {
   try {
@@ -37,28 +39,34 @@ export default async function CRMLayout({
   const avatarUrl = user?.avatar_url || null
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      {/* Sidebar - desktop only */}
-      <Sidebar
-        userName={userName}
-        userEmail={userEmail}
-        avatarUrl={avatarUrl}
-      />
+    // Live message alerts are mounted here, not inside /inbox, so a new
+    // WhatsApp lands with a sound, a system notification and a badge no matter
+    // which screen is open.
+    <InboxAlertsProvider>
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        {/* Sidebar - desktop only */}
+        <Sidebar
+          userName={userName}
+          userEmail={userEmail}
+          avatarUrl={avatarUrl}
+        />
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <TopBar userName={userName} avatarUrl={avatarUrl} />
+        {/* Main content area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <TopBar userName={userName} avatarUrl={avatarUrl} />
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
-          {children}
-        </main>
+          <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
+            <EnablePushBanner />
+            {children}
+          </main>
+        </div>
+
+        {/* Mobile bottom navigation */}
+        <MobileNav />
+
+        {/* PWA service worker registration (silent) */}
+        <ServiceWorkerRegister />
       </div>
-
-      {/* Mobile bottom navigation */}
-      <MobileNav />
-
-      {/* PWA service worker registration (silent) */}
-      <ServiceWorkerRegister />
-    </div>
+    </InboxAlertsProvider>
   )
 }

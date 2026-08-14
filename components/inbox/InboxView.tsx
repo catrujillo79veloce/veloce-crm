@@ -1,13 +1,16 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { Inbox, MessageSquare, ArrowLeft } from "lucide-react"
+import { Inbox, MessageSquare, ArrowLeft, Wifi, WifiOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EmptyState } from "@/components/ui"
-import { createClient } from "@/lib/supabase/client"
+import { useLiveTable } from "@/lib/realtime/useLiveTable"
+import { useInboxAlerts } from "@/components/notifications/InboxAlerts"
+import { refreshConversations } from "@/app/actions/inbox"
+import { isUnread } from "@/lib/inbox/shared"
 import ConversationList from "./ConversationList"
 import ConversationThread from "./ConversationThread"
-import type { ConversationSummary } from "@/app/(crm)/inbox/page"
+import type { ConversationSummary } from "@/lib/inbox/shared"
 import type { Contact, Interaction, InteractionType } from "@/lib/types"
 import type { MentionablePerson } from "./MentionPicker"
 
@@ -32,47 +35,6 @@ interface InboxViewProps {
 }
 
 // ---------------------------------------------------------------------------
-// Notification helpers
-// ---------------------------------------------------------------------------
-
-function flashTitle(text: string) {
-  if (typeof document === "undefined") return
-  const original = document.title
-  let toggled = false
-  const interval = setInterval(() => {
-    document.title = toggled ? original : text
-    toggled = !toggled
-  }, 1000)
-  setTimeout(() => {
-    clearInterval(interval)
-    document.title = original
-  }, 8000)
-}
-
-function playPing() {
-  if (typeof window === "undefined") return
-  try {
-    // Tiny synthesized "ding" via Web Audio — no asset needed.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
-    if (!Ctx) return
-    const ctx = new Ctx()
-    const o = ctx.createOscillator()
-    const g = ctx.createGain()
-    o.type = "sine"
-    o.frequency.value = 880
-    g.gain.setValueAtTime(0.18, ctx.currentTime)
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
-    o.connect(g)
-    g.connect(ctx.destination)
-    o.start()
-    o.stop(ctx.currentTime + 0.3)
-  } catch {
-    // Browsers block AudioContext if no user gesture has happened yet — silent fail
-  }
-}
-
-// ---------------------------------------------------------------------------
 // InboxView
 // ---------------------------------------------------------------------------
 
@@ -85,6 +47,8 @@ export default function InboxView({
     initialConversations[0]?.contact.id ?? null
   )
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all")
+  const [syncing, setSyncing] = useState(false)
+  const { markRead } = useInboxAlerts()
 
   // Keep latest state accessible inside the realtime callback without
   // re-subscribing on every render.
@@ -94,110 +58,103 @@ export default function InboxView({
   }, [selectedContactId])
 
   // -------------------------------------------------------------------------
-  // Realtime: live-update conversation list when new interactions land
+  // Authoritative re-sync. Runs on every (re)connect, on tab focus, when the
+  // network returns and on a slow poll — so a dropped websocket can no longer
+  // strand the list until someone reloads the page.
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    const supabase = createClient()
-
-    const channel = supabase
-      .channel("inbox-interactions")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "crm_interactions",
-        },
-        async (payload) => {
-          const row = payload.new as Interaction & { contact_id: string }
-
-          // Only message-type interactions go in the inbox
-          if (!MESSAGE_TYPES.includes(row.type)) return
-
-          // Notify the human if it's an inbound message
-          if (row.direction === "inbound") {
-            playPing()
-            flashTitle("💬 Nuevo mensaje")
-          }
-
-          setConversations((prev) => {
-            const idx = prev.findIndex((c) => c.contact.id === row.contact_id)
-
-            if (idx >= 0) {
-              // Existing conversation — bump it to the top + update last interaction
-              const updated = [...prev]
-              const existing = updated[idx]
-              const newUnread =
-                row.direction === "inbound" && !row.team_member_id
-                  ? existing.unreadCount + 1
-                  : existing.unreadCount
-              updated.splice(idx, 1)
-              return [
-                {
-                  ...existing,
-                  lastInteraction: row as Interaction,
-                  unreadCount:
-                    row.contact_id === selectedRef.current ? 0 : newUnread,
-                },
-                ...updated,
-              ]
-            }
-
-            // New contact — fetch its profile so we can render it
-            void (async () => {
-              const { data: contact } = await supabase
-                .from("crm_contacts")
-                .select(
-                  "id, first_name, last_name, email, phone, whatsapp_phone, facebook_id, instagram_id, source, avatar_url, status, ai_enabled, ai_paused_at, assigned_to"
-                )
-                .eq("id", row.contact_id)
-                .single()
-              if (!contact) return
-              setConversations((curr) => {
-                // Avoid double-insert if another event already added it
-                if (curr.some((c) => c.contact.id === contact.id)) return curr
-                return [
-                  {
-                    contact: contact as unknown as Contact,
-                    lastInteraction: row as Interaction,
-                    unreadCount: row.direction === "inbound" ? 1 : 0,
-                  },
-                  ...curr,
-                ]
-              })
-            })()
-            return prev
-          })
-        }
+  const resync = useCallback(async () => {
+    setSyncing(true)
+    try {
+      const fresh = await refreshConversations()
+      // Preserve the locally-cleared unread state of the conversation the user
+      // is reading right now, so a poll can't make the badge reappear.
+      const openId = selectedRef.current
+      setConversations(
+        fresh.map((c) =>
+          c.contact.id === openId ? { ...c, unreadCount: 0 } : c
+        )
       )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "crm_contacts",
-        },
-        (payload) => {
-          // Sync ai_enabled changes (e.g., auto-pause when human sends)
-          const updated = payload.new as Contact
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.contact.id === updated.id
-                ? {
-                    ...c,
-                    contact: { ...c.contact, ...updated },
-                  }
-                : c
-            )
-          )
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
+    } catch (e) {
+      console.error("[Inbox] resync failed:", e)
+    } finally {
+      setSyncing(false)
     }
   }, [])
+
+  // -------------------------------------------------------------------------
+  // Realtime: live-update conversation list when new interactions land
+  // -------------------------------------------------------------------------
+  const handleInsert = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (raw: any) => {
+      const row = raw as Interaction & { contact_id: string }
+
+      // Only message-type interactions go in the inbox
+      if (!MESSAGE_TYPES.includes(row.type)) return
+
+      const isOpenAndWatched =
+        row.contact_id === selectedRef.current &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible"
+
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.contact.id === row.contact_id)
+
+        if (idx >= 0) {
+          // Existing conversation — bump it to the top + update last interaction
+          const updated = [...prev]
+          const existing = updated[idx]
+          const counts = isUnread(row, existing.contact.inbox_read_at)
+          updated.splice(idx, 1)
+          return [
+            {
+              ...existing,
+              lastInteraction: row as Interaction,
+              unreadCount: isOpenAndWatched
+                ? 0
+                : existing.unreadCount + (counts ? 1 : 0),
+            },
+            ...updated,
+          ]
+        }
+
+        // First message from a contact we don't have loaded yet: pull the
+        // authoritative list rather than assembling a half-row client-side.
+        void resync()
+        return prev
+      })
+
+      // The conversation is open on screen — treat it as seen immediately.
+      if (isOpenAndWatched) markRead(row.contact_id)
+    },
+    [markRead, resync]
+  )
+
+  const status = useLiveTable({
+    channel: "inbox-interactions",
+    table: "crm_interactions",
+    onInsert: handleInsert,
+    onResync: resync,
+    pollMs: 30_000,
+  })
+
+  // Sync contact-level changes (ai_enabled auto-pause, assignment, avatar).
+  useLiveTable({
+    channel: "inbox-contacts",
+    table: "crm_contacts",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onUpdate: useCallback((raw: any) => {
+      const updated = raw as Contact
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.contact.id === updated.id
+            ? { ...c, contact: { ...c.contact, ...updated } }
+            : c
+        )
+      )
+    }, []),
+    pollMs: 0,
+  })
 
   const filteredConversations = conversations.filter((conv) => {
     if (channelFilter === "all") return true
@@ -208,15 +165,20 @@ export default function InboxView({
     (c) => c.contact.id === selectedContactId
   )
 
-  const handleSelectConversation = useCallback((contactId: string) => {
-    setSelectedContactId(contactId)
-    // Clear unread count for the conversation we're opening
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.contact.id === contactId ? { ...c, unreadCount: 0 } : c
+  const handleSelectConversation = useCallback(
+    (contactId: string) => {
+      setSelectedContactId(contactId)
+      // Clear unread count for the conversation we're opening, and persist it
+      // so the badge stays cleared across reloads and other devices.
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.contact.id === contactId ? { ...c, unreadCount: 0 } : c
+        )
       )
-    )
-  }, [])
+      markRead(contactId)
+    },
+    [markRead]
+  )
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
@@ -226,9 +188,10 @@ export default function InboxView({
           <h1 className="text-xl font-semibold text-gray-900">
             Bandeja de Entrada
           </h1>
-          <p className="text-sm text-gray-500">
-            {conversations.length} conversaciones
-          </p>
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <span>{conversations.length} conversaciones</span>
+            <ConnectionPill status={status} syncing={syncing} onRetry={resync} />
+          </div>
         </div>
 
         {/* Channel filter tabs */}
@@ -313,5 +276,47 @@ export default function InboxView({
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Connection indicator — makes the live link visible instead of leaving the
+// operator guessing whether "no messages" means calm or broken.
+// ---------------------------------------------------------------------------
+
+function ConnectionPill({
+  status,
+  syncing,
+  onRetry,
+}: {
+  status: "connecting" | "live" | "reconnecting" | "offline"
+  syncing: boolean
+  onRetry: () => void
+}) {
+  if (status === "live") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-xs text-green-600"
+        title="Los mensajes nuevos aparecen solos"
+      >
+        <Wifi className="w-3.5 h-3.5" />
+        {syncing ? "Actualizando…" : "En vivo"}
+      </span>
+    )
+  }
+
+  return (
+    <button
+      onClick={onRetry}
+      className="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-800"
+      title="Sin conexión en vivo. Toca para actualizar ahora."
+    >
+      {status === "offline" ? (
+        <WifiOff className="w-3.5 h-3.5" />
+      ) : (
+        <RefreshCw className={cn("w-3.5 h-3.5", syncing && "animate-spin")} />
+      )}
+      {status === "offline" ? "Sin conexión" : "Reconectando…"}
+    </button>
   )
 }

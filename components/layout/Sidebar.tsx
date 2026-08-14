@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
 import { signOut } from "@/app/actions/auth"
+import { useInboxAlerts } from "@/components/notifications/InboxAlerts"
 
 interface NavItem {
   icon: React.ElementType
@@ -57,6 +58,7 @@ export default function Sidebar({ userName = "Usuario", userEmail = "", avatarUr
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
   const { t } = useI18n()
+  const { unread } = useInboxAlerts()
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard"
@@ -91,6 +93,7 @@ export default function Sidebar({ userName = "Usuario", userEmail = "", avatarUr
             const Icon = item.icon
             const active = isActive(item.href)
             const label = t.nav[item.labelKey]
+            const badge = item.href === "/inbox" ? unread : 0
 
             return (
               <li key={item.href}>
@@ -103,17 +106,41 @@ export default function Sidebar({ userName = "Usuario", userEmail = "", avatarUr
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
                     collapsed && "justify-center px-2"
                   )}
-                  title={collapsed ? label : undefined}
+                  title={
+                    collapsed
+                      ? badge > 0
+                        ? `${label} (${badge} sin leer)`
+                        : label
+                      : undefined
+                  }
                   aria-current={active ? "page" : undefined}
                 >
-                  <Icon
-                    className={cn(
-                      "flex-shrink-0",
-                      active ? "text-veloce-600" : "text-gray-400",
+                  <span className="relative flex-shrink-0">
+                    <Icon
+                      className={cn(
+                        active ? "text-veloce-600" : "text-gray-400"
+                      )}
+                      size={20}
+                    />
+                    {badge > 0 && collapsed && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                        {badge > 99 ? "99+" : badge}
+                      </span>
                     )}
-                    size={20}
-                  />
-                  {!collapsed && <span>{label}</span>}
+                  </span>
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{label}</span>
+                      {badge > 0 && (
+                        <span
+                          className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center"
+                          aria-label={`${badge} sin leer`}
+                        >
+                          {badge > 99 ? "99+" : badge}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </Link>
               </li>
             )

@@ -3,7 +3,7 @@
 import { MessageCircle, MessageSquare, Camera, BotOff } from "lucide-react"
 import { cn, truncate, formatRelativeTime } from "@/lib/utils"
 import { Avatar } from "@/components/ui"
-import type { ConversationSummary } from "@/app/(crm)/inbox/page"
+import type { ConversationSummary } from "@/lib/inbox/shared"
 import type { Interaction, InteractionType } from "@/lib/types"
 import type { MentionablePerson } from "./MentionPicker"
 

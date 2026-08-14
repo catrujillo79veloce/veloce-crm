@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
+import { verifyWebhookSignatureAny } from "@/lib/integrations/webhook-verify"
 import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
 import {
   extractFirstAttachment,
@@ -14,7 +14,7 @@ import { notifyAdminOfNewMessage, alertAdminSystemFailure } from "@/lib/ai/notif
 import { shouldAIReply } from "@/lib/ai/should-reply"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
-import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { buildAIInput, describeInbound } from "@/lib/ai/build-ai-input"
 import { classifyIntent } from "@/lib/ai/classify-intent"
 import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
@@ -50,12 +50,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
 
-  // Verify signature
+  // Signature verification — STRICT (fail closed).
+  //
+  // This used to be `if (appSecret && !verify(...))`, which silently accepted
+  // every unsigned payload the moment FACEBOOK_APP_SECRET went missing. All
+  // three secrets belong to the same Meta app, so accepting any of them keeps
+  // this resilient to an env-var mixup without widening the trust domain.
   const signature = request.headers.get("x-hub-signature-256") ?? ""
-  const appSecret = process.env.FACEBOOK_APP_SECRET ?? ""
+  const verified = verifyWebhookSignatureAny(rawBody, signature, [
+    process.env.FACEBOOK_APP_SECRET,
+    process.env.META_APP_SECRET,
+    process.env.INSTAGRAM_APP_SECRET,
+  ])
 
-  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
-    console.warn("[Facebook Webhook] Invalid signature")
+  if (!verified) {
+    console.warn("[Facebook Webhook] Invalid signature — rejected")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
@@ -93,6 +102,11 @@ export async function POST(request: NextRequest) {
 async function processMessengerMessages(body: any) {
   const entries = body?.entry ?? []
   const supabase = createAdminClient()
+
+  // Alerts and tagging run concurrently with the AI reply but are awaited
+  // before returning — Vercel freezes the instance as soon as the webhook
+  // responds, which silently kills genuinely fire-and-forget work.
+  const background: Promise<unknown>[] = []
 
   for (const entry of entries) {
     const messagingEvents = entry?.messaging ?? []
@@ -245,9 +259,24 @@ async function processMessengerMessages(body: any) {
             occurred_at: new Date(timestamp).toISOString(),
           })
         if (inboundInsertError) {
-          // Unique index on channel_message_id: a concurrent Meta retry already
-          // owns this message. Skip so we don't send a duplicate reply.
-          console.log("[Messenger] Duplicate webhook suppressed:", messageId)
+          // 23505 = unique index on channel_message_id (a concurrent Meta
+          // retry already owns this message). Anything else means the
+          // customer's message was lost and must not be logged as a duplicate.
+          if (inboundInsertError.code === "23505") {
+            console.log("[Messenger] Duplicate webhook suppressed:", messageId)
+          } else {
+            console.error(
+              "[Messenger] MESSAGE LOST — insert failed:",
+              inboundInsertError.code,
+              inboundInsertError.message
+            )
+            background.push(
+              alertAdminSystemFailure(
+                "Mensaje perdido al guardar",
+                `No se pudo guardar un mensaje de Messenger (${inboundInsertError.code ?? "sin código"}: ${inboundInsertError.message}). Revísalo manualmente en Facebook.`
+              ).catch((e) => console.error("[Messenger] Loss alert failed:", e))
+            )
+          }
           continue
         }
 
@@ -256,47 +285,60 @@ async function processMessengerMessages(body: any) {
         if (!text && !media) continue
 
         // --- HOT ALERT ---
-        const detection = detectHotMessage(text)
+        // Built from the transcription / vision caption too — for a voice note
+        // or a photo the raw text field is empty, which made media alerts
+        // arrive blank and kept the buying-intent detector from firing on them.
+        const alertText = describeInbound({
+          text,
+          transcription,
+          visionCaption,
+          mediaType,
+        })
+        const detection = detectHotMessage(alertText)
         const contactName = `Facebook User ${senderId.slice(-6)}`
-        let hotPingFired = false
-        if (detection.isHot) {
-          hotPingFired = true
-          sendHotAlert({
-            adminPhone: ADMIN_PHONE,
-            contactName,
-            contactId,
-            channel: "facebook",
-            message: text,
-            detection,
-          }).catch((e) => console.error("[Messenger] Hot alert failed:", e))
-        }
+        const hotPingFired = detection.isHot
 
-        // --- GENERIC NOTIFY: debounced ping for every new inbound ---
-        notifyAdminOfNewMessage({
-          supabase,
-          contactId,
-          contactName,
-          channel: "facebook",
-          message: text,
-          skip: hotPingFired,
-        }).catch((e) => console.error("[Messenger] Notify admin failed:", e))
+        if (hotPingFired) {
+          background.push(
+            sendHotAlert({
+              adminPhone: ADMIN_PHONE,
+              contactName,
+              contactId,
+              channel: "facebook",
+              message: alertText,
+              detection,
+            }).catch((e) => console.error("[Messenger] Hot alert failed:", e))
+          )
+        }
+        background.push(
+          notifyAdminOfNewMessage({
+            supabase,
+            contactId,
+            contactName,
+            channel: "facebook",
+            message: alertText,
+            skip: hotPingFired,
+          }).catch((e) => console.error("[Messenger] Notify admin failed:", e))
+        )
 
         // --- AUTO-TAG by intent (fire-and-forget) ---
         const intentInput = transcription
           ? `${text} ${transcription}`.trim()
           : text
         if (intentInput && intentInput.length > 2) {
-          classifyIntent(intentInput)
-            .then((res) => {
-              if (res)
-                return applyIntentTag(
-                  supabase,
-                  contactId,
-                  res.intent,
-                  res.confidence
-                )
-            })
-            .catch((e) => console.error("[Messenger] Intent tag failed:", e))
+          background.push(
+            classifyIntent(intentInput)
+              .then((res) => {
+                if (res)
+                  return applyIntentTag(
+                    supabase,
+                    contactId,
+                    res.intent,
+                    res.confidence
+                  )
+              })
+              .catch((e) => console.error("[Messenger] Intent tag failed:", e))
+          )
         }
 
         // --- AI REPLY GATE: respect per-contact pause + global pause ---
@@ -386,6 +428,9 @@ async function processMessengerMessages(body: any) {
       }
     }
   }
+
+  // Let alerts and tagging finish before the runtime freezes this instance.
+  await Promise.allSettled(background)
 }
 
 // ---------------------------------------------------------------------------

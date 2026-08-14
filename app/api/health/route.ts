@@ -54,9 +54,28 @@ export async function GET(request: NextRequest) {
     "INSTAGRAM_ACCESS_TOKEN",
     "INSTAGRAM_APP_SECRET",
     "INSTAGRAM_VERIFY_TOKEN",
+    // Without these two, no device can ever be alerted of a new message.
+    "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
+    "VAPID_PRIVATE_KEY",
   ]
   for (const v of vars) {
     checks[v] = process.env[v] ? "OK" : "MISSING"
+  }
+
+  // How many devices would actually receive a "new message" push right now.
+  // Zero here means the CRM is silent no matter how well the webhooks run.
+  try {
+    const supabase = createServerSupabaseClient()
+    const { count, error } = await supabase
+      .from("crm_push_subscriptions")
+      .select("id", { count: "exact", head: true })
+    checks["PUSH_DEVICES"] = error
+      ? `FAIL: ${error.message}`
+      : count && count > 0
+        ? `OK (${count})`
+        : "FAIL: ningún dispositivo suscrito"
+  } catch (e: unknown) {
+    checks["PUSH_DEVICES"] = `FAIL: ${e instanceof Error ? e.message : String(e)}`
   }
 
   // Live Anthropic test against the SAME model production uses (so a retired

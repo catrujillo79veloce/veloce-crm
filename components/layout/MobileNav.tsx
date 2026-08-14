@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/config"
 import { signOut } from "@/app/actions/auth"
+import { useInboxAlerts } from "@/components/notifications/InboxAlerts"
 
 const mainTabs = [
   { icon: LayoutDashboard, labelKey: "dashboard" as const, href: "/dashboard" },
@@ -48,6 +49,7 @@ export default function MobileNav() {
   const pathname = usePathname()
   const { t, locale } = useI18n()
   const menuRef = useRef<HTMLDivElement>(null)
+  const { unread } = useInboxAlerts()
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard"
@@ -126,6 +128,7 @@ export default function MobileNav() {
         {mainTabs.map((tab) => {
           const Icon = tab.icon
           const active = isActive(tab.href)
+          const badge = tab.href === "/inbox" ? unread : 0
           return (
             <li key={tab.href} className="flex-1">
               <Link
@@ -135,11 +138,23 @@ export default function MobileNav() {
                   active ? "text-veloce-600" : "text-gray-500"
                 )}
                 aria-current={active ? "page" : undefined}
+                aria-label={
+                  badge > 0
+                    ? `${t.nav[tab.labelKey]}, ${badge} sin leer`
+                    : undefined
+                }
               >
-                <Icon
-                  size={22}
-                  className={active ? "text-veloce-600" : "text-gray-400"}
-                />
+                <span className="relative">
+                  <Icon
+                    size={22}
+                    className={active ? "text-veloce-600" : "text-gray-400"}
+                  />
+                  {badge > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </span>
                 <span className={cn("font-medium", active && "text-veloce-700")}>
                   {t.nav[tab.labelKey]}
                 </span>

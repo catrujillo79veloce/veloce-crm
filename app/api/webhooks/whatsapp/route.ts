@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { verifyWebhookSignature } from "@/lib/integrations/webhook-verify"
+import { verifyWebhookSignatureAny } from "@/lib/integrations/webhook-verify"
 import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
@@ -13,7 +13,7 @@ import {
 } from "@/lib/integrations/media-storage"
 import { transcribeAudio } from "@/lib/ai/transcribe"
 import { captionImage } from "@/lib/ai/vision"
-import { buildAIInput } from "@/lib/ai/build-ai-input"
+import { buildAIInput, describeInbound } from "@/lib/ai/build-ai-input"
 import { classifyIntent } from "@/lib/ai/classify-intent"
 import { applyIntentTag } from "@/lib/ai/apply-intent-tag"
 
@@ -48,11 +48,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text()
 
-  // Verify signature
+  // Signature verification — STRICT (fail closed).
+  //
+  // This used to be `if (appSecret && !verify(...))`, which silently accepted
+  // every unsigned payload the moment WHATSAPP_APP_SECRET was missing or
+  // renamed — an open write endpoint with no warning anywhere. All three
+  // secrets belong to the same Meta app, so accepting any of them keeps this
+  // resilient to an env-var mixup without widening the trust domain.
   const signature = request.headers.get("x-hub-signature-256") ?? ""
-  const appSecret = process.env.WHATSAPP_APP_SECRET ?? ""
+  const verified = verifyWebhookSignatureAny(rawBody, signature, [
+    process.env.WHATSAPP_APP_SECRET,
+    process.env.META_APP_SECRET,
+    process.env.FACEBOOK_APP_SECRET,
+  ])
 
-  if (appSecret && !verifyWebhookSignature(rawBody, signature, appSecret)) {
+  if (!verified) {
+    console.warn("[WhatsApp Webhook] Invalid signature — rejected")
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
   }
 
@@ -84,6 +95,13 @@ async function processAndReply(body: any) {
   if (messages.length === 0) return
 
   const supabase = createAdminClient()
+
+  // Alerts and tagging run concurrently with the AI reply, but every promise
+  // is collected and awaited before this function returns. Vercel freezes the
+  // instance the moment the webhook responds, so a truly fire-and-forget
+  // notification can be killed mid-flight — which is how new messages ended up
+  // reaching nobody.
+  const background: Promise<unknown>[] = []
 
   for (const msg of messages) {
     try {
@@ -216,45 +234,76 @@ async function processAndReply(body: any) {
           occurred_at: occurredAt,
         })
       if (inboundInsertError) {
-        // Unique index on channel_message_id: a concurrent Meta retry already
-        // owns this message. Skip so we don't send a duplicate reply.
-        console.log("[WhatsApp] Duplicate webhook suppressed:", msg.messageId)
+        // 23505 = unique violation on channel_message_id: a concurrent Meta
+        // retry already owns this message, so skipping is correct.
+        //
+        // Anything else is a real write failure and the customer's message is
+        // gone. Treating every error as "duplicate" made those losses invisible
+        // — the log even claimed the opposite of what happened.
+        if (inboundInsertError.code === "23505") {
+          console.log("[WhatsApp] Duplicate webhook suppressed:", msg.messageId)
+        } else {
+          console.error(
+            "[WhatsApp] MESSAGE LOST — insert failed:",
+            inboundInsertError.code,
+            inboundInsertError.message
+          )
+          background.push(
+            alertAdminSystemFailure(
+              "Mensaje perdido al guardar",
+              `No se pudo guardar un WhatsApp entrante (${inboundInsertError.code ?? "sin código"}: ${inboundInsertError.message}). Revisa la conversación manualmente — el cliente escribió y el CRM no lo registró.`
+            ).catch((e) => console.error("[WhatsApp] Loss alert failed:", e))
+          )
+        }
         continue
       }
 
       console.log("[WhatsApp] Inbound saved for:", contactId)
 
       // --- HOT ALERT: notify admin if message shows buying intent ---
-      const detection = detectHotMessage(msg.message)
+      // Built from the transcription / vision caption too, not just the raw
+      // text field: for a voice note or a photo that field is empty, which made
+      // every media alert arrive blank and kept the buying-intent detector from
+      // ever firing on the way most customers actually write.
+      const alertText = describeInbound({
+        text: msg.message,
+        caption: msg.caption,
+        transcription,
+        visionCaption,
+        mediaType,
+      })
+      const detection = detectHotMessage(alertText)
       const contactName = msg.senderName ?? normalizedPhone
       // Surface the originating ad in admin notifications
       const messageForAlerts = msg.referral
-        ? `${msg.message}\n📣 Viene de la pauta: ${msg.referral.headline ?? "Click-to-WhatsApp"}`
-        : msg.message
+        ? `${alertText}\n📣 Viene de la pauta: ${msg.referral.headline ?? "Click-to-WhatsApp"}`
+        : alertText
       const isAdminSelf = ADMIN_PHONE === normalizedPhone.replace(/\+/g, "")
-      let hotPingFired = false
-      if (detection.isHot && !isAdminSelf) {
-        hotPingFired = true
-        sendHotAlert({
-          adminPhone: ADMIN_PHONE,
-          contactName,
-          contactId,
-          channel: "whatsapp",
-          message: messageForAlerts,
-          detection,
-        }).catch((e) => console.error("[WhatsApp] Hot alert failed:", e))
-      }
+      const hotPingFired = detection.isHot && !isAdminSelf
 
-      // --- GENERIC NOTIFY: debounced ping for every new inbound ---
       if (!isAdminSelf) {
-        notifyAdminOfNewMessage({
-          supabase,
-          contactId,
-          contactName,
-          channel: "whatsapp",
-          message: messageForAlerts,
-          skip: hotPingFired, // hot alert already covers this message
-        }).catch((e) => console.error("[WhatsApp] Notify admin failed:", e))
+        if (hotPingFired) {
+          background.push(
+            sendHotAlert({
+              adminPhone: ADMIN_PHONE,
+              contactName,
+              contactId,
+              channel: "whatsapp",
+              message: messageForAlerts,
+              detection,
+            }).catch((e) => console.error("[WhatsApp] Hot alert failed:", e))
+          )
+        }
+        background.push(
+          notifyAdminOfNewMessage({
+            supabase,
+            contactId,
+            contactName,
+            channel: "whatsapp",
+            message: messageForAlerts,
+            skip: hotPingFired, // hot alert already pushed for this message
+          }).catch((e) => console.error("[WhatsApp] Notify admin failed:", e))
+        )
       }
 
       // --- AUTO-TAG by intent (fire-and-forget, doesn't block the bot) ---
@@ -262,11 +311,13 @@ async function processAndReply(body: any) {
         ? `${msg.message} ${transcription}`.trim()
         : msg.message
       if (intentInput && intentInput.length > 2) {
-        classifyIntent(intentInput)
-          .then((res) => {
-            if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
-          })
-          .catch((e) => console.error("[WhatsApp] Intent tag failed:", e))
+        background.push(
+          classifyIntent(intentInput)
+            .then((res) => {
+              if (res) return applyIntentTag(supabase, contactId, res.intent, res.confidence)
+            })
+            .catch((e) => console.error("[WhatsApp] Intent tag failed:", e))
+        )
       }
 
       // --- AI REPLY GATE: respect per-contact pause + global pause ---
@@ -362,4 +413,7 @@ async function processAndReply(body: any) {
       console.error("[WhatsApp] Error:", error)
     }
   }
+
+  // Let alerts and tagging finish before the runtime freezes this instance.
+  await Promise.allSettled(background)
 }

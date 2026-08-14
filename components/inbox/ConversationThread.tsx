@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
   MessageCircle,
   MessageSquare,
@@ -18,6 +18,7 @@ import {
 import { cn, formatDateTime } from "@/lib/utils"
 import { Avatar, LoadingSpinner } from "@/components/ui"
 import { createClient } from "@/lib/supabase/client"
+import { useLiveTable } from "@/lib/realtime/useLiveTable"
 import MessageComposer from "./MessageComposer"
 import MessageMedia from "./MessageMedia"
 import ContactTagsBar from "./ContactTagsBar"
@@ -174,13 +175,13 @@ export default function ConversationThread({
   const assignedMember =
     teamMembers.find((m) => m.id === assignedTo) ?? null
 
-  // Load messages for this contact (channel messages + internal notes)
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadMessages() {
-      setLoading(true)
+  // Load messages for this contact (channel messages + internal notes).
+  // Doubles as the resync callback: after a dropped websocket this pulls the
+  // whole thread again instead of leaving a hole where messages should be.
+  const loadMessages = useCallback(
+    async (opts?: { silent?: boolean }) => {
       const supabase = createClient()
+      if (!opts?.silent) setLoading(true)
 
       const { data, error } = await supabase
         .from("crm_interactions")
@@ -197,78 +198,93 @@ export default function ConversationThread({
           "instagram_message",
           "note",
         ])
-        .order("occurred_at", { ascending: true })
-        .limit(100)
+        // Newest first + limit, then flipped back to chronological order.
+        // Ascending + limit returned the OLDEST 200 messages, so on any long
+        // conversation a reload showed a thread frozen weeks in the past and
+        // the message that just arrived was nowhere to be seen.
+        .order("occurred_at", { ascending: false })
+        .limit(200)
 
-      if (!cancelled) {
-        if (error) {
-          console.error("Load messages error:", error)
-          setMessages([])
-        } else {
-          setMessages(
+      if (error) {
+        console.error("Load messages error:", error)
+        if (!opts?.silent) setMessages([])
+      } else {
+        const rows = (data ?? [])
+          .map(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (data ?? []).map((row: any) => ({
-              ...row,
-              team_member: row.team_member ?? undefined,
-            }))
+            (row: any) => ({ ...row, team_member: row.team_member ?? undefined })
           )
-        }
-        setLoading(false)
+          .reverse() as Interaction[]
+        setMessages((prev) => {
+          // Keep optimistic bubbles that the server hasn't caught up with yet.
+          const pending = prev.filter(
+            (m) =>
+              m.id.startsWith("temp-") &&
+              !rows.some(
+                (r) =>
+                  r.direction === m.direction &&
+                  r.body === m.body &&
+                  Math.abs(
+                    new Date(r.occurred_at).getTime() -
+                      new Date(m.occurred_at).getTime()
+                  ) < 30000
+              )
+          )
+          return [...rows, ...pending]
+        })
       }
-    }
+      setLoading(false)
+    },
+    [contact.id]
+  )
 
-    loadMessages()
-    return () => {
-      cancelled = true
-    }
-  }, [contact.id])
+  useEffect(() => {
+    setMessages([])
+    void loadMessages()
+  }, [loadMessages])
 
   // Realtime: append new messages and internal notes
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`thread-${contact.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "crm_interactions",
-          filter: `contact_id=eq.${contact.id}`,
-        },
-        (payload) => {
-          const row = payload.new as Interaction
-          const ALLOWED: InteractionType[] = [
-            "whatsapp_message",
-            "facebook_message",
-            "instagram_message",
-            "note",
-          ]
-          if (!ALLOWED.includes(row.type)) return
-          setMessages((prev) => {
-            const cleaned = prev.filter(
-              (m) =>
-                !(
-                  m.id.startsWith("temp-") &&
-                  m.direction === row.direction &&
-                  m.body === row.body &&
-                  Math.abs(
-                    new Date(m.occurred_at).getTime() -
-                      new Date(row.occurred_at).getTime()
-                  ) < 30000
-                )
+  const handleInsert = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (raw: any) => {
+      const row = raw as Interaction
+      const ALLOWED: InteractionType[] = [
+        "whatsapp_message",
+        "facebook_message",
+        "instagram_message",
+        "note",
+      ]
+      if (!ALLOWED.includes(row.type)) return
+      setMessages((prev) => {
+        const cleaned = prev.filter(
+          (m) =>
+            !(
+              m.id.startsWith("temp-") &&
+              m.direction === row.direction &&
+              m.body === row.body &&
+              Math.abs(
+                new Date(m.occurred_at).getTime() -
+                  new Date(row.occurred_at).getTime()
+              ) < 30000
             )
-            if (cleaned.some((m) => m.id === row.id)) return cleaned
-            return [...cleaned, row]
-          })
-        }
-      )
-      .subscribe()
+        )
+        if (cleaned.some((m) => m.id === row.id)) return cleaned
+        return [...cleaned, row]
+      })
+    },
+    []
+  )
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [contact.id])
+  const resync = useCallback(() => loadMessages({ silent: true }), [loadMessages])
+
+  useLiveTable({
+    channel: `thread-${contact.id}`,
+    table: "crm_interactions",
+    filter: `contact_id=eq.${contact.id}`,
+    onInsert: handleInsert,
+    onResync: resync,
+    pollMs: 30_000,
+  })
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {

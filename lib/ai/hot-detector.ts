@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import { sendPush } from "@/lib/push/send"
 
 // Keywords grouped by intensity
 const HOT_KEYWORDS = {
@@ -132,14 +133,31 @@ ${channelEmoji} Canal: *${channel.toUpperCase()}*
 
 Ver en CRM: ${crmBaseUrl}/contacts/${contactId}`
 
-  try {
-    const result = await sendWhatsAppMessage(adminPhone, alert)
-    if (!result.ok) {
-      console.error("[HotAlert] Send failed:", result.error)
-    }
-    return result.ok
-  } catch (err) {
-    console.error("[HotAlert] Send failed:", err)
+  // A buying-intent message is the single most valuable notification the CRM
+  // sends, so it goes out over both channels. It used to be WhatsApp-only, and
+  // the generic push was suppressed whenever this fired — meaning the hottest
+  // leads produced no phone notification at all.
+  const [pushResult, waResult] = await Promise.allSettled([
+    sendPush({
+      title: `${emoji} ${label}: ${contactName}`,
+      body: message.length > 160 ? message.slice(0, 160) + "..." : message,
+      url: `/inbox`,
+      tag: `hot-${contactId}`,
+      urgency: "high",
+    }),
+    sendWhatsAppMessage(adminPhone, alert),
+  ])
+
+  if (pushResult.status === "rejected") {
+    console.error("[HotAlert] Push failed:", pushResult.reason)
+  }
+  if (waResult.status === "rejected") {
+    console.error("[HotAlert] WhatsApp failed:", waResult.reason)
     return false
   }
+  if (!waResult.value.ok) {
+    console.error("[HotAlert] WhatsApp failed:", waResult.value.error)
+    return false
+  }
+  return true
 }
