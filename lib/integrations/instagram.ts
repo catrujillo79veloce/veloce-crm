@@ -1,6 +1,8 @@
 // Instagram Business Login API (IGAA tokens) requires graph.instagram.com.
 // Facebook-page-based access (EAA tokens) used graph.facebook.com — kept here
 // only to document why this differs from facebook.ts / whatsapp.ts.
+import { getInstagramToken } from "./instagram-token"
+
 const GRAPH_API_VERSION = "v22.0"
 const GRAPH_API_BASE = `https://graph.instagram.com/${GRAPH_API_VERSION}`
 
@@ -19,7 +21,8 @@ export async function sendInstagramMessage(
   message: string,
   options?: { humanAgent?: boolean }
 ): Promise<SendResult> {
-  const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN
+  // Stored token first (auto-refreshed by the cron), env var as fallback.
+  const accessToken = await getInstagramToken()
 
   if (!accessToken) {
     console.error("[Instagram] Missing INSTAGRAM_ACCESS_TOKEN")
@@ -72,7 +75,7 @@ export async function sendInstagramMedia(
   type: "image" | "audio" | "video",
   url: string
 ): Promise<SendResult> {
-  const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN
+  const accessToken = await getInstagramToken()
   if (!accessToken) {
     return { ok: false, error: "Credenciales de Instagram no configuradas" }
   }
