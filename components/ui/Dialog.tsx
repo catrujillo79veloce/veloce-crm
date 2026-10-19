@@ -26,9 +26,25 @@ function Dialog({ open, onClose, title, children, className }: DialogProps) {
     }
   }, [open])
 
+  // A click only counts as "on the backdrop" when the press STARTED there.
+  // Without this, selecting text inside a field by dragging (e.g. highlighting
+  // a price to retype it) can release outside that field, and the browser then
+  // reports the click on the <dialog> itself — which silently closed the form
+  // mid-edit and looked like "it won't let me update".
+  const pressedOnBackdrop = useRef(false)
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDialogElement>) => {
+      pressedOnBackdrop.current = e.target === dialogRef.current
+    },
+    []
+  )
+
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent<HTMLDialogElement>) => {
-      if (e.target === dialogRef.current) {
+      const startedOnBackdrop = pressedOnBackdrop.current
+      pressedOnBackdrop.current = false
+      if (startedOnBackdrop && e.target === dialogRef.current) {
         onClose()
       }
     },
@@ -52,6 +68,7 @@ function Dialog({ open, onClose, title, children, className }: DialogProps) {
         "open:animate-in open:fade-in-0 open:zoom-in-95",
         className
       )}
+      onMouseDown={handleMouseDown}
       onClick={handleBackdropClick}
       onCancel={handleCancel}
     >

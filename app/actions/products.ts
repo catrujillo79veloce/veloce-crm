@@ -91,7 +91,7 @@ export async function createProduct(formData: {
   category: ProductCategory
   sku?: string | null
   price: number
-  cost?: number | null
+  sale_price?: number | null
   description?: string | null
   stock_quantity?: number
   in_stock?: boolean
@@ -106,7 +106,7 @@ export async function createProduct(formData: {
       category: formData.category,
       sku: formData.sku ?? null,
       price: formData.price,
-      cost: formData.cost ?? null,
+      sale_price: formData.sale_price ?? null,
       currency: "COP",
       description: formData.description ?? null,
       stock_quantity: formData.stock_quantity ?? 0,
@@ -133,7 +133,7 @@ export async function updateProduct(
     category?: ProductCategory
     sku?: string | null
     price?: number
-    cost?: number | null
+    sale_price?: number | null
     description?: string | null
     stock_quantity?: number
     in_stock?: boolean

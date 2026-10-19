@@ -229,10 +229,30 @@ export function ProductsGrid({ products, total }: ProductsGridProps) {
                         )}
                       </div>
 
-                      {/* Price */}
-                      <p className="text-base font-bold text-gray-900">
-                        {formatCurrency(product.price)}
-                      </p>
+                      {/* Price — on offer shows the new price, the crossed-out
+                          original and the discount the customer gets */}
+                      {product.sale_price &&
+                      product.sale_price < product.price ? (
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                          <p className="text-base font-bold text-gray-900">
+                            {formatCurrency(product.sale_price)}
+                          </p>
+                          <p className="text-xs text-gray-400 line-through">
+                            {formatCurrency(product.price)}
+                          </p>
+                          <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
+                            -
+                            {Math.round(
+                              (1 - product.sale_price / product.price) * 100
+                            )}
+                            %
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-base font-bold text-gray-900">
+                          {formatCurrency(product.price)}
+                        </p>
+                      )}
 
                       {/* Stock */}
                       <div className="flex items-center gap-2">

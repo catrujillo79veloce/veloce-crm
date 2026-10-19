@@ -30,7 +30,7 @@ export function ProductForm({
   const [category, setCategory] = useState<ProductCategory>("road_bike")
   const [sku, setSku] = useState("")
   const [price, setPrice] = useState("")
-  const [cost, setCost] = useState("")
+  const [salePrice, setSalePrice] = useState("")
   const [description, setDescription] = useState("")
   const [stockQuantity, setStockQuantity] = useState("0")
   const [inStock, setInStock] = useState(true)
@@ -44,7 +44,7 @@ export function ProductForm({
       setCategory(product.category)
       setSku(product.sku || "")
       setPrice(product.price.toString())
-      setCost(product.cost?.toString() || "")
+      setSalePrice(product.sale_price?.toString() || "")
       setDescription(product.description || "")
       setStockQuantity(product.stock_quantity.toString())
       setInStock(product.in_stock)
@@ -54,7 +54,7 @@ export function ProductForm({
       setCategory("road_bike")
       setSku("")
       setPrice("")
-      setCost("")
+      setSalePrice("")
       setDescription("")
       setStockQuantity("0")
       setInStock(true)
@@ -80,6 +80,17 @@ export function ProductForm({
       return
     }
 
+    // An "offer" that isn't cheaper would show the customer a 0% discount.
+    if (salePrice && parseFloat(salePrice) >= parseFloat(price)) {
+      toast(
+        "error",
+        locale === "es"
+          ? "El nuevo precio debe ser menor que el precio normal"
+          : "The sale price must be lower than the regular price"
+      )
+      return
+    }
+
     startTransition(async () => {
       const formData = {
         name: name.trim(),
@@ -87,7 +98,7 @@ export function ProductForm({
         category,
         sku: sku.trim() || null,
         price: parseFloat(price),
-        cost: cost ? parseFloat(cost) : null,
+        sale_price: salePrice ? parseFloat(salePrice) : null,
         description: description.trim() || null,
         stock_quantity: parseInt(stockQuantity) || 0,
         in_stock: inStock,
@@ -119,6 +130,20 @@ export function ProductForm({
     value: c.value,
     label: c.label[locale],
   }))
+
+  // Live discount preview, so the shop sees exactly what the customer will see.
+  const priceNum = parseFloat(price)
+  const saleNum = parseFloat(salePrice)
+  const hasBothPrices =
+    Number.isFinite(priceNum) &&
+    priceNum > 0 &&
+    Number.isFinite(saleNum) &&
+    saleNum > 0
+  const discountPct =
+    hasBothPrices && saleNum < priceNum
+      ? Math.round((1 - saleNum / priceNum) * 100)
+      : null
+  const saleNotCheaper = hasBothPrices && saleNum >= priceNum
 
   return (
     <Dialog
@@ -163,24 +188,56 @@ export function ProductForm({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input
-            label={`${t.products.price} (COP)`}
-            type="number"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="0"
-            min="0"
-            required
-          />
-          <Input
-            label={`${t.products.cost} (COP)`}
-            type="number"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-            placeholder="0"
-            min="0"
-          />
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label={
+                locale === "es"
+                  ? "Precio normal (COP)"
+                  : "Regular price (COP)"
+              }
+              type="number"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0"
+              min="0"
+              required
+            />
+            <Input
+              label={
+                locale === "es"
+                  ? "Nuevo precio / oferta (COP)"
+                  : "Sale price (COP)"
+              }
+              type="number"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+              placeholder={locale === "es" ? "Opcional" : "Optional"}
+              min="0"
+            />
+          </div>
+
+          {discountPct !== null && (
+            <p className="text-xs font-medium text-green-600">
+              {locale === "es"
+                ? `El cliente ve ${discountPct}% de descuento`
+                : `Customer sees ${discountPct}% off`}
+            </p>
+          )}
+          {saleNotCheaper && (
+            <p className="text-xs font-medium text-amber-600">
+              {locale === "es"
+                ? "El nuevo precio debe ser menor que el precio normal"
+                : "The sale price must be lower than the regular price"}
+            </p>
+          )}
+          {!salePrice && (
+            <p className="text-xs text-gray-500">
+              {locale === "es"
+                ? "Deja el nuevo precio vacío si el producto no está en oferta"
+                : "Leave the sale price empty if the product is not on offer"}
+            </p>
+          )}
         </div>
 
         <Textarea
