@@ -21,6 +21,8 @@ interface CatalogCacheEntry {
 
 let cache: CatalogCacheEntry | null = null
 const CACHE_TTL_MS = 60_000
+/** The shop's own name, lowercase — it is never a manufacturer. */
+const SHOP_BRAND = "veloce"
 
 function fmtCop(n: number): string {
   return "$" + Math.round(n).toLocaleString("es-CO")
@@ -74,8 +76,14 @@ export async function getCatalogBlock(): Promise<string> {
       // where a doubled name matches no product.
       const name = String(p.name)
       const brandName = p.brand ? String(p.brand) : ""
+      // "Veloce" is the shop, not a manufacturer, so prefixing it to our own
+      // services read as "Veloce Mantenimiento eBike" — and the bot echoed
+      // that name into the [FOTO: ...] marker, where it matches no product.
+      const isOwnBrand = brandName.toLowerCase() === SHOP_BRAND
       const brand =
-        brandName && !name.toLowerCase().includes(brandName.toLowerCase())
+        brandName &&
+        !isOwnBrand &&
+        !name.toLowerCase().includes(brandName.toLowerCase())
           ? `${brandName} `
           : ""
       // Marks the products the bot is allowed to send a photo of. A product

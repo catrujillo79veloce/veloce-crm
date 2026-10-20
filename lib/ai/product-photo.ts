@@ -67,46 +67,107 @@ export function isSendablePhotoUrl(url: string | null | undefined): boolean {
   return /\.(jpg|jpeg|png)$/.test(path)
 }
 
-/** Postgres LIKE wildcards would otherwise come from the model's output. */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[%_\\]/g, (c) => `\\${c}`)
+/**
+ * Collapse a product name to comparable tokens: no accents, no case, no
+ * punctuation, and no parentheticals — so "Indoor Cycling Veloce (clase
+ * suelta)" and "indoor cycling veloce" line up.
+ */
+function normalizeName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+interface Candidate {
+  name: string
+  imageUrl: string
 }
 
 /**
- * Find the image of an active product by name. Matches the exact name first,
- * then falls back to a contains match, because the model occasionally adds or
- * drops the brand ("Orca M30" vs "Orbea Orca M30").
+ * Pick the product the bot meant. The model does not always echo the catalog
+ * name byte-for-byte — it drops or adds the brand ("Orca M30" for "Orbea Orca
+ * M30", "Veloce Bike Fit Retul 3D" for "Bike Fit Retul 3D") — so exact-only
+ * matching silently sends no photo after the bot already promised one.
+ *
+ * Ranks by how close the token sequences are and requires a single clear
+ * winner: on a genuine tie ("Casco Kask" fits both Kask helmets) it returns
+ * nothing, because sending the wrong product's photo is worse than sending
+ * none.
+ */
+export function pickProductByName<T extends Candidate>(
+  query: string,
+  candidates: T[]
+): T | null {
+  const q = normalizeName(query)
+  if (!q) return null
+
+  // Spacing around model numbers is unreliable ("M-20", "M 20", "m20"), so
+  // every tier is also tried with the spaces removed.
+  const qCompact = q.replace(/ /g, "")
+
+  const scored = candidates
+    .map((c) => {
+      const n = normalizeName(c.name)
+      if (!n) return null
+      const nCompact = n.replace(/ /g, "")
+
+      let score: number
+      if (n === q) score = 1000
+      else if (nCompact === qCompact) score = 900
+      else if (n.includes(q) || q.includes(n)) score = 500
+      else if (nCompact.includes(qCompact) || qCompact.includes(nCompact)) {
+        score = 400
+      } else {
+        // Every word the bot gave us has to appear in the product name,
+        // otherwise it is talking about something else.
+        const nTokens = new Set(n.split(" "))
+        if (!q.split(" ").every((t) => nTokens.has(t))) return null
+        score = 100
+      }
+
+      return { candidate: c, score }
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null)
+
+  if (scored.length === 0) return null
+
+  // A single clear winner only. "Casco Kask" fits both Kask helmets and
+  // "Colnago V3" fits both Colnagos — there the bot has not said which one it
+  // means, and sending the wrong product's photo is worse than sending none.
+  const topScore = Math.max(...scored.map((s) => s.score))
+  const winners = scored.filter((s) => s.score === topScore)
+  return winners.length === 1 ? winners[0].candidate : null
+}
+
+/**
+ * Find the stored image of an active product the bot asked to show. Returns
+ * null when there is no match, no photo, or the photo is in a format Meta
+ * refuses to deliver — the caller then just sends the text.
  */
 export async function findProductPhoto(
   name: string
 ): Promise<ProductPhoto | null> {
-  const query = name.trim()
-  if (!query) return null
+  if (!name.trim()) return null
 
   try {
     const supabase = createAdminClient()
+    const { data, error } = await supabase
+      .from("crm_products")
+      .select("name, image_url")
+      .eq("is_active", true)
+      .not("image_url", "is", null)
 
-    const base = () =>
-      supabase
-        .from("crm_products")
-        .select("name, image_url")
-        .eq("is_active", true)
-        .not("image_url", "is", null)
+    if (error || !data) return null
 
-    const exact = await base().ilike("name", escapeLikePattern(query)).limit(1)
-    const hit =
-      exact.data && exact.data.length > 0
-        ? exact.data[0]
-        : (
-            await base()
-              .ilike("name", `%${escapeLikePattern(query)}%`)
-              .limit(1)
-          ).data?.[0]
+    const candidates: Candidate[] = data
+      .filter((p) => isSendablePhotoUrl(p.image_url as string | null))
+      .map((p) => ({ name: String(p.name), imageUrl: String(p.image_url) }))
 
-    if (!hit?.image_url || !isSendablePhotoUrl(String(hit.image_url))) {
-      return null
-    }
-    return { name: String(hit.name), imageUrl: String(hit.image_url) }
+    return pickProductByName(name, candidates)
   } catch (e) {
     console.error("[ProductPhoto] Lookup failed:", e)
     return null
