@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignatureAny } from "@/lib/integrations/webhook-verify"
-import { fetchLeadData, parseLeadgenWebhook, sendFacebookMessage } from "@/lib/integrations/facebook"
+import {
+  fetchLeadData,
+  parseLeadgenWebhook,
+  sendFacebookMessage,
+  sendFacebookMedia,
+} from "@/lib/integrations/facebook"
+import { extractPhotoRequest, findProductPhoto } from "@/lib/ai/product-photo"
 import {
   extractFirstAttachment,
   normalizeMessengerReferral,
@@ -401,16 +407,54 @@ async function processMessengerMessages(body: any) {
           continue
         }
 
+        // The bot requests a catalog photo with a [FOTO: ...] marker. Strip it
+        // out and resolve the real image; the customer gets the text first and
+        // the photo right after, like a human asesor would send it.
+        const { text: replyText, productName } = extractPhotoRequest(aiResponse)
+        const photo = productName ? await findProductPhoto(productName) : null
+        if (productName && !photo) {
+          console.warn("[Messenger] Bot pidió una foto inexistente:", productName)
+        }
+        const messageText =
+          replyText ||
+          (photo ? `Te comparto la foto de la ${photo.name} 👇` : "")
+
+        if (!messageText) {
+          console.error("[Messenger] Empty AI reply, skipping:", contactId)
+          continue
+        }
+
         // --- Send via Messenger ---
-        const sent = await sendFacebookMessage(senderId, aiResponse)
+        const sent = await sendFacebookMessage(senderId, messageText)
 
         if (sent.ok) {
+          // A failed photo is not a failed reply: the text already went out.
+          let photoUrl: string | null = null
+          if (photo) {
+            const photoSent = await sendFacebookMedia(
+              senderId,
+              "image",
+              photo.imageUrl
+            )
+            if (photoSent.ok) {
+              photoUrl = photo.imageUrl
+            } else {
+              console.error("[Messenger] Product photo failed:", photoSent.error)
+            }
+          }
+
           await supabase.from("crm_interactions").insert({
             contact_id: contactId,
             type: "facebook_message",
             direction: "outbound",
-            body: aiResponse,
-            channel_metadata: { ai_generated: true, recipient_id: senderId },
+            body: messageText,
+            media_url: photoUrl,
+            media_type: photoUrl ? "image" : null,
+            channel_metadata: {
+              ai_generated: true,
+              recipient_id: senderId,
+              ...(photoUrl ? { product_photo: photo?.name } : {}),
+            },
             occurred_at: new Date().toISOString(),
           })
           console.log("[Messenger] AI replied to:", contactId)

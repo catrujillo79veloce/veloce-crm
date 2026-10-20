@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Camera, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/Toast"
+import { toJpegFile } from "@/lib/image-to-jpeg"
 
 // ---------------------------------------------------------------------------
 // Overlay button to upload/replace a product photo from the grid.
@@ -26,8 +27,18 @@ export default function ProductImageButton({
     if (!file) return
     setUploading(true)
     try {
+      // Meta rejects WebP as an image message, so the bot could not send it.
+      // Normalize to JPEG here, whatever the shop drags in.
+      let upload: File
+      try {
+        upload = await toJpegFile(file)
+      } catch {
+        toast("error", "No pudimos leer esa imagen. Prueba con un JPG o PNG.")
+        return
+      }
+
       const fd = new FormData()
-      fd.append("file", file)
+      fd.append("file", upload)
       const res = await fetch(`/api/products/${productId}/image`, {
         method: "POST",
         body: fd,

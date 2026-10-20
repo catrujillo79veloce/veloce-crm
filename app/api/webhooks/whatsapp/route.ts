@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { verifyWebhookSignatureAny } from "@/lib/integrations/webhook-verify"
-import { parseWhatsAppWebhook, sendWhatsAppMessage } from "@/lib/integrations/whatsapp"
+import {
+  parseWhatsAppWebhook,
+  sendWhatsAppMessage,
+  sendWhatsAppMedia,
+} from "@/lib/integrations/whatsapp"
+import { extractPhotoRequest, findProductPhoto } from "@/lib/ai/product-photo"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
@@ -384,17 +389,53 @@ async function processAndReply(body: any) {
         continue
       }
 
+      // The bot requests a catalog photo with a [FOTO: ...] marker. Strip it
+      // out and resolve the real image; the customer gets the text first and
+      // the photo right after, like a human asesor would send it.
+      const { text: replyText, productName } = extractPhotoRequest(aiResponse)
+      const photo = productName ? await findProductPhoto(productName) : null
+      if (productName && !photo) {
+        console.warn("[WhatsApp] Bot pidió una foto inexistente:", productName)
+      }
+      const messageText =
+        replyText || (photo ? `Te comparto la foto de la ${photo.name} 👇` : "")
+
+      if (!messageText) {
+        console.error("[WhatsApp] Empty AI reply, skipping:", contactId)
+        continue
+      }
+
       // --- Send reply via WhatsApp API ---
-      const sent = await sendWhatsAppMessage(normalizedPhone, aiResponse)
+      const sent = await sendWhatsAppMessage(normalizedPhone, messageText)
 
       if (sent.ok) {
+        // A failed photo is not a failed reply: the text already went out.
+        let photoUrl: string | null = null
+        if (photo) {
+          const photoSent = await sendWhatsAppMedia(
+            normalizedPhone,
+            "image",
+            photo.imageUrl
+          )
+          if (photoSent.ok) {
+            photoUrl = photo.imageUrl
+          } else {
+            console.error("[WhatsApp] Product photo failed:", photoSent.error)
+          }
+        }
+
         // Save outbound message in CRM
         await supabase.from("crm_interactions").insert({
           contact_id: contactId,
           type: "whatsapp_message",
           direction: "outbound",
-          body: aiResponse,
-          channel_metadata: { ai_generated: true },
+          body: messageText,
+          media_url: photoUrl,
+          media_type: photoUrl ? "image" : null,
+          channel_metadata: {
+            ai_generated: true,
+            ...(photoUrl ? { product_photo: photo?.name } : {}),
+          },
           occurred_at: new Date().toISOString(),
         })
         console.log("[WhatsApp] AI replied to:", contactId)

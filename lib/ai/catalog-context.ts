@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isSendablePhotoUrl } from "@/lib/ai/product-photo"
 
 interface CatalogCacheEntry {
   block: string
@@ -47,7 +48,7 @@ export async function getCatalogBlock(): Promise<string> {
     const { data, error } = await supabase
       .from("crm_products")
       .select(
-        "name, brand, category, price, sale_price, in_stock, stock_quantity, sizes"
+        "name, brand, category, price, sale_price, in_stock, stock_quantity, sizes, image_url"
       )
       .eq("is_active", true)
       .order("category", { ascending: true })
@@ -68,7 +69,13 @@ export async function getCatalogBlock(): Promise<string> {
           ? ` | tallas: ${(p.sizes as string[]).join(", ")}`
           : ""
       const brand = p.brand ? `${p.brand} ` : ""
-      return `- [${cat}] ${brand}${p.name} — ${priceStr} (${stock})${sizes}`
+      // Marks the products the bot is allowed to send a photo of. A product
+      // with no image — or one in a format Meta refuses to deliver — stays
+      // unmarked, so the bot never promises a picture we cannot attach.
+      const photo = isSendablePhotoUrl(p.image_url as string | null)
+        ? " | FOTO disponible"
+        : ""
+      return `- [${cat}] ${brand}${p.name} — ${priceStr} (${stock})${sizes}${photo}`
     })
 
     const block = `## CATALOGO ACTUAL (precios reales, usa SIEMPRE estos datos)\n${lines.join("\n")}`

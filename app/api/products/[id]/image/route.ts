@@ -10,6 +10,7 @@ import { uploadBytesToStorage } from "@/lib/integrations/media-storage"
 
 export const maxDuration = 30
 const MAX_BYTES = 8 * 1024 * 1024
+const SENDABLE_MIMES = ["image/jpeg", "image/png"]
 
 export async function POST(
   request: NextRequest,
@@ -25,8 +26,15 @@ export async function POST(
   const form = await request.formData()
   const file = form.get("file") as File | null
   if (!file) return NextResponse.json({ error: "Falta el archivo" }, { status: 400 })
-  if (!file.type.startsWith("image/")) {
-    return NextResponse.json({ error: "El archivo debe ser una imagen" }, { status: 400 })
+  // The bot sends these photos over WhatsApp/Messenger/Instagram, and Meta
+  // only accepts JPEG and PNG as image messages (WebP is sticker-only). The
+  // uploader converts to JPEG before posting; this is the backstop so a bad
+  // format fails loudly here instead of silently breaking the bot's reply.
+  if (!SENDABLE_MIMES.includes(file.type)) {
+    return NextResponse.json(
+      { error: "La foto debe ser JPG o PNG (los demás formatos no se pueden enviar por WhatsApp)" },
+      { status: 400 }
+    )
   }
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: "La imagen supera 8 MB" }, { status: 400 })
