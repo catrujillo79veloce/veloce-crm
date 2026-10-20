@@ -68,14 +68,23 @@ export async function getCatalogBlock(): Promise<string> {
         Array.isArray(p.sizes) && p.sizes.length > 0
           ? ` | tallas: ${(p.sizes as string[]).join(", ")}`
           : ""
-      const brand = p.brand ? `${p.brand} ` : ""
+      // Most names already carry the brand ("Orbea Wild M-20", "Casco Kask
+      // Protone"), so prefixing blindly produced "Orbea Orbea Wild M-20" —
+      // which the bot echoed back, including inside the [FOTO: ...] marker,
+      // where a doubled name matches no product.
+      const name = String(p.name)
+      const brandName = p.brand ? String(p.brand) : ""
+      const brand =
+        brandName && !name.toLowerCase().includes(brandName.toLowerCase())
+          ? `${brandName} `
+          : ""
       // Marks the products the bot is allowed to send a photo of. A product
       // with no image — or one in a format Meta refuses to deliver — stays
       // unmarked, so the bot never promises a picture we cannot attach.
       const photo = isSendablePhotoUrl(p.image_url as string | null)
         ? " | FOTO disponible"
         : ""
-      return `- [${cat}] ${brand}${p.name} — ${priceStr} (${stock})${sizes}${photo}`
+      return `- [${cat}] ${brand}${name} — ${priceStr} (${stock})${sizes}${photo}`
     })
 
     const block = `## CATALOGO ACTUAL (precios reales, usa SIEMPRE estos datos)\n${lines.join("\n")}`

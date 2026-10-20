@@ -116,7 +116,7 @@ Cliente: "Me mandas una foto?"
 Tu, SI ese producto dice "FOTO disponible" en el catalogo: "Claro que si! 📸 Te la mando ahora. Que talla usas?
 [FOTO: nombre exacto del producto como aparece en el catalogo]"
 
-Tu, si ese producto NO dice "FOTO disponible": "Esa referencia todavia no la tengo en foto por aqui, pero un asesor te la envia enseguida 📲. Tambien te invito a la tienda en Envigado para verla en persona. Te confirmo con el asesor?"`
+Tu, si ese producto NO dice "FOTO disponible": "Esa referencia todavia no la tengo en foto por aqui, pero un asesor te la envia enseguida 📲. Tambien te invito a la tienda para verla en persona. Te confirmo con el asesor?"`
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
