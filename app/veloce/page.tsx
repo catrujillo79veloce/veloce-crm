@@ -1,4 +1,3 @@
-import Link from "next/link"
 import {
   Bike,
   Wrench,
@@ -15,13 +14,24 @@ import {
   ChevronRight,
 } from "lucide-react"
 
+import { getLandingCatalog, type ServicePrices } from "@/lib/landing/catalog"
+
 // ---------------------------------------------------------------------------
 // Veloce public landing page (/veloce)
 //
 // Server-rendered for SEO, fast load, and Google Ads landing-page approval.
 // Designed to convert paid-ad traffic into WhatsApp conversations, visits to
 // the store, or phone calls. The destination URL we point Google Ads at.
+//
+// Every price on this page comes from crm_products — see lib/landing/catalog.
 // ---------------------------------------------------------------------------
+
+/**
+ * Regenerate the page at most once a minute so a price Carlos changes in
+ * /products reaches the landing without a deploy. Mirrors
+ * LANDING_REVALIDATE_SECONDS, which Next needs as a literal here.
+ */
+export const revalidate = 60
 
 const WHATSAPP_NUMBER = "573176354893"
 const WHATSAPP_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
@@ -48,64 +58,36 @@ const BRANDS = [
   "Pirelli",
 ]
 
-const SERVICES = [
+/**
+ * The copy for each service card. The price is not here: it comes from the
+ * matching crm_products rows via `priceKey`.
+ */
+const SERVICES: {
+  icon: typeof Award
+  title: string
+  description: string
+  priceKey: keyof ServicePrices
+}[] = [
   {
     icon: Award,
     title: "Bike Fit Retul 3D",
     description:
       "Análisis biomecánico con 16 sensores de movimiento en tiempo real. Más comodidad, menos lesiones, más eficiencia.",
-    price: "$440.000",
+    priceKey: "bikeFit",
   },
   {
     icon: Activity,
     title: "Indoor Cycling",
     description:
-      "Clases grupales en nuestro estudio con instructor certificado y bicicletas Wattbike. Ideal para mejorar fondo y técnica.",
-    price: "Desde $50.000",
+      "Clases grupales en nuestro centro de entrenamiento: 9 simuladores Wahoo conectados a Zwift, con instructor certificado. Ideal para mejorar fondo y técnica.",
+    priceKey: "indoorCycling",
   },
   {
     icon: Wrench,
     title: "Taller Especializado",
     description:
       "Mantenimiento, ajuste de transmisión, lavado profesional, sangrado de frenos. Mecánicos certificados Shimano y Sram.",
-    price: "Consulta",
-  },
-]
-
-const FEATURED_PRODUCTS = [
-  {
-    name: "Colnago V3 Shimano 105 Di2",
-    category: "Bicicleta de Ruta",
-    price: "$14.900.000",
-    oldPrice: "$17.900.000",
-    badge: "OFERTA",
-  },
-  {
-    name: "Orbea Orca M30",
-    category: "Bicicleta de Ruta",
-    price: "$10.299.000",
-    oldPrice: "$11.299.000",
-    badge: "OFERTA",
-  },
-  {
-    name: "Orbea Wild M-20",
-    category: "E-MTB",
-    price: "$34.499.000",
-  },
-  {
-    name: "Orbea Alma H20",
-    category: "MTB",
-    price: "$5.999.000",
-  },
-  {
-    name: "Casco Kask Protone Icon",
-    category: "Accesorios",
-    price: "$1.100.000",
-  },
-  {
-    name: "Gafas Koo Alibi",
-    category: "Accesorios",
-    price: "$899.000",
+    priceKey: "workshop",
   },
 ]
 
@@ -115,7 +97,9 @@ const HIGHLIGHTS = [
   { icon: Award, label: "Único Bike Fit Retul 3D en Medellín" },
 ]
 
-export default function VeloceLanding() {
+export default async function VeloceLanding() {
+  const { featured, services } = await getLandingCatalog()
+
   return (
     <main className="min-h-screen bg-white">
       {/* ============ HERO ============ */}
@@ -251,7 +235,9 @@ export default function VeloceLanding() {
                 <p className="text-gray-600 mb-4 text-sm leading-relaxed">
                   {service.description}
                 </p>
-                <p className="text-veloce-600 font-bold">{service.price}</p>
+                <p className="text-veloce-600 font-bold">
+                  {services[service.priceKey]}
+                </p>
               </div>
             )
           })}
@@ -270,37 +256,43 @@ export default function VeloceLanding() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURED_PRODUCTS.map((product) => (
-              <div
-                key={product.name}
-                className="bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-lg transition relative"
-              >
-                {product.badge && (
-                  <span className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">
-                    {product.badge}
-                  </span>
-                )}
-                <div className="aspect-square bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl mb-4 flex items-center justify-center">
-                  <Bike className="h-16 w-16 text-gray-400" />
-                </div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                  {product.category}
-                </p>
-                <h3 className="font-bold text-gray-900 mb-2">{product.name}</h3>
-                <div className="flex items-baseline gap-2">
-                  {product.oldPrice && (
-                    <span className="text-sm text-gray-400 line-through">
-                      {product.oldPrice}
+          {/* Empty only if the catalog can't be read — the CTA below still
+              works, so the page keeps converting. */}
+          {featured.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {featured.map((product) => (
+                <div
+                  key={product.name}
+                  className="bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-lg transition relative"
+                >
+                  {product.badge && (
+                    <span className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded">
+                      {product.badge}
                     </span>
                   )}
-                  <span className="text-lg font-bold text-veloce-600">
-                    {product.price}
-                  </span>
+                  <div className="aspect-square bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl mb-4 flex items-center justify-center">
+                    <Bike className="h-16 w-16 text-gray-400" />
+                  </div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                    {product.category}
+                  </p>
+                  <h3 className="font-bold text-gray-900 mb-2">
+                    {product.name}
+                  </h3>
+                  <div className="flex items-baseline gap-2">
+                    {product.oldPrice && (
+                      <span className="text-sm text-gray-400 line-through">
+                        {product.oldPrice}
+                      </span>
+                    )}
+                    <span className="text-lg font-bold text-veloce-600">
+                      {product.price}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           <div className="text-center mt-10">
             <a
