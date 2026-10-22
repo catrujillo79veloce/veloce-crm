@@ -40,6 +40,7 @@ const GOOGLE_ADS_ID = process.env.NEXT_PUBLIC_GOOGLE_ADS_ID
 const WHATSAPP_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_WHATSAPP_LABEL ?? ""
 const MAPS_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_MAPS_LABEL ?? ""
 const CALL_LABEL = process.env.NEXT_PUBLIC_GOOGLE_ADS_CALL_LABEL ?? ""
+const META_PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID
 
 export default function VeloceLandingLayout({
   children,
@@ -86,6 +87,57 @@ export default function VeloceLandingLayout({
               })();
             `}
           </Script>
+        </>
+      )}
+
+      {/* Meta Pixel — the signal Facebook/Instagram ads run on: it lets us
+          retarget visitors, build lookalike audiences from them, and measure
+          what the ads actually produce. The account's pixel existed since
+          2022 but had not fired since Jan 2023, because it was never
+          installed on this site. Only loads when configured. */}
+      {META_PIXEL_ID && (
+        <>
+          <Script id="meta-pixel" strategy="afterInteractive">
+            {`
+              !function(f,b,e,v,n,t,s)
+              {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+              n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+              if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+              n.queue=[];t=b.createElement(e);t.async=!0;
+              t.src=v;s=b.getElementsByTagName(e)[0];
+              s.parentNode.insertBefore(t,s)}(window,document,'script',
+              'https://connect.facebook.net/en_US/fbevents.js');
+              fbq('init', '${META_PIXEL_ID}');
+              fbq('track', 'PageView');
+            `}
+          </Script>
+          {/* The same CTAs Google Ads counts, reported to Meta as standard
+              events so ad sets can optimize for them. Deliberately a separate
+              listener from the Google one: either platform can be switched
+              off without touching the other. */}
+          <Script id="meta-pixel-events" strategy="afterInteractive">
+            {`
+              (function() {
+                var EV = { whatsapp: 'Contact', call: 'Contact', maps: 'FindLocation' };
+                document.addEventListener('click', function(e) {
+                  var t = e.target;
+                  while (t && t.nodeType === 1 && !(t.tagName === 'A' && t.dataset && t.dataset.conversion)) {
+                    t = t.parentNode;
+                  }
+                  if (!t || !t.dataset) return;
+                  var ev = EV[t.dataset.conversion];
+                  if (window.fbq && ev) {
+                    window.fbq('track', ev, { content_name: t.dataset.conversion });
+                  }
+                }, true);
+              })();
+            `}
+          </Script>
+          {/* No <noscript> tracking pixel on purpose. Meta's snippet ships
+              one, but Next preloads the <img> src even inside <noscript>,
+              and that preload is itself a GET to /tr?ev=PageView — so every
+              visitor would be counted twice. The fallback only ever covered
+              visitors with JavaScript off, who cannot click our CTAs anyway. */}
         </>
       )}
       {children}
