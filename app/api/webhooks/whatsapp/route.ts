@@ -7,6 +7,7 @@ import {
   sendWhatsAppMedia,
 } from "@/lib/integrations/whatsapp"
 import { extractPhotoRequest, findProductPhoto } from "@/lib/ai/product-photo"
+import { formatReplyForChannel } from "@/lib/ai/format-reply"
 import { normalizePhone } from "@/lib/utils"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
@@ -392,7 +393,10 @@ async function processAndReply(body: any) {
       // The bot requests a catalog photo with a [FOTO: ...] marker. Strip it
       // out and resolve the real image; the customer gets the text first and
       // the photo right after, like a human asesor would send it.
-      const { text: replyText, productName } = extractPhotoRequest(aiResponse)
+      // ...then make it look like a WhatsApp message: the model still writes
+      // **negrita** and bullet lists, which WhatsApp shows literally.
+      const { text: rawReply, productName } = extractPhotoRequest(aiResponse)
+      const replyText = formatReplyForChannel(rawReply, "whatsapp")
       const photo = productName ? await findProductPhoto(productName) : null
       if (productName && !photo) {
         console.warn("[WhatsApp] Bot pidió una foto inexistente:", productName)

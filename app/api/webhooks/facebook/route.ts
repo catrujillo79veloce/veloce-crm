@@ -8,6 +8,7 @@ import {
   sendFacebookMedia,
 } from "@/lib/integrations/facebook"
 import { extractPhotoRequest, findProductPhoto } from "@/lib/ai/product-photo"
+import { formatReplyForChannel } from "@/lib/ai/format-reply"
 import {
   extractFirstAttachment,
   normalizeMessengerReferral,
@@ -410,7 +411,10 @@ async function processMessengerMessages(body: any) {
         // The bot requests a catalog photo with a [FOTO: ...] marker. Strip it
         // out and resolve the real image; the customer gets the text first and
         // the photo right after, like a human asesor would send it.
-        const { text: replyText, productName } = extractPhotoRequest(aiResponse)
+        // ...then strip the markdown the model still writes: Messenger
+        // renders no markup at all, so **negrita** reaches the customer as-is.
+        const { text: rawReply, productName } = extractPhotoRequest(aiResponse)
+        const replyText = formatReplyForChannel(rawReply, "messenger")
         const photo = productName ? await findProductPhoto(productName) : null
         if (productName && !photo) {
           console.warn("[Messenger] Bot pidió una foto inexistente:", productName)

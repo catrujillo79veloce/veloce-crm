@@ -19,6 +19,7 @@ import {
   extractPhotoRequest,
   findProductPhoto,
 } from "@/lib/ai/product-photo"
+import { formatReplyForChannel } from "@/lib/ai/format-reply"
 
 async function main() {
   const args = process.argv.slice(2)
@@ -47,7 +48,12 @@ async function main() {
   const photo = productName ? await findProductPhoto(productName) : null
 
   console.log("PREGUNTA: " + question)
-  console.log("RESPUESTA: " + text)
+  // CRUDO is what the model wrote; WHATSAPP / INSTAGRAM are what the customer
+  // actually reads, after the formatter. Compare them to see whether the
+  // prompt's formatting rule held or the safety net had to catch it.
+  console.log("CRUDO: " + text)
+  console.log("WHATSAPP: " + formatReplyForChannel(text, "whatsapp"))
+  console.log("INSTAGRAM: " + formatReplyForChannel(text, "instagram"))
   console.log("FOTO_PEDIDA: " + (productName ?? "(ninguna)"))
   console.log(
     "FOTO_ENVIADA: " +

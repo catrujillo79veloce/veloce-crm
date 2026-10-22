@@ -7,6 +7,7 @@ import {
   sendInstagramMedia,
 } from "@/lib/integrations/instagram"
 import { extractPhotoRequest, findProductPhoto } from "@/lib/ai/product-photo"
+import { formatReplyForChannel } from "@/lib/ai/format-reply"
 import { generateAgentResponse } from "@/lib/ai/veloce-agent"
 import { detectHotMessage, sendHotAlert } from "@/lib/ai/hot-detector"
 import { notifyAdminOfNewMessage, alertAdminSystemFailure } from "@/lib/ai/notify-admin"
@@ -375,7 +376,10 @@ async function processInstagramMessages(body: any) {
       // The bot requests a catalog photo with a [FOTO: ...] marker. Strip it
       // out and resolve the real image; the customer gets the text first and
       // the photo right after, like a human asesor would send it.
-      const { text: replyText, productName } = extractPhotoRequest(aiResponse)
+      // ...then strip the markdown the model still writes: Instagram DM
+      // renders no markup at all, so **negrita** reaches the customer as-is.
+      const { text: rawReply, productName } = extractPhotoRequest(aiResponse)
+      const replyText = formatReplyForChannel(rawReply, "instagram")
       const photo = productName ? await findProductPhoto(productName) : null
       if (productName && !photo) {
         console.warn("[Instagram] Bot pidió una foto inexistente:", productName)
